@@ -37,12 +37,14 @@ UNIVERSE = {
     "HON": ("Honeywell", "Energy & Industry"), "NEE": ("NextEra Energy", "Energy & Industry"),
     "T": ("AT&T", "Energy & Industry"), "VZ": ("Verizon", "Energy & Industry"),
 }
+TOP_TECH = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ORCL", "AMD", "NFLX", "PLTR"]   # slide 3 of movers
 SECTORS = ["All", "Tech", "Finance", "Healthcare", "Consumer", "Energy & Industry"]
 
 # ---- Categories: label, accent, playlist, how to tell it, tags ----------------------------------------
 CATEGORIES = {
     "movers": ("BIGGEST MOVERS TODAY", "0x3B82F6", "Biggest Movers",
-               "Today's biggest winners and losers among big US stocks, with the reason from the news.",
+               "Today's 4 biggest gainers among big US stocks (or the 4 biggest losers if the market fell), "
+               "with the reason from the news.",
                ["stock market today", "biggest movers"]),
     "news": ("MARKET NEWS", "0x3B82F6", "Market News",
              "The 3 market stories that mattered most today, and which stocks they moved.",
@@ -106,6 +108,7 @@ def mood_track(mood):
 MUSIC_START = float(env("MUSIC_START", "0"))
 CHANNEL = env("CHANNEL", "MARKET PULSE")                 # shown in every frame
 FILE_NO = len(used) + 1
+HEADLINE, COVER_END = "", 0.0                           # set per video
 NARRATION = env("NARRATION", "1") == "1"
 VOICE = env("VOICE", "en-US-AndrewNeural")
 MUSIC_VOL = float(env("MUSIC_VOL", "0.08" if NARRATION else "0.18"))
@@ -121,15 +124,34 @@ DISCLAIMER = ("Not financial advice. This is an automated summary of public mark
 # ---- Layout 1080x1920: black bar | slide | black bar ---------------------------
 TOP_BAR, MID_H = 380, 810
 BOT_Y = TOP_BAR + MID_H
-WHITE, RED, YELLOW = "&H00FFFFFF&", "&H00F6823B&", "&H00FDC593&"   # ASS colours (BGR): blue, light blue
-GREEN_ASS, RED_ASS = "&H005EC522&", "&H004444EF&"                  # growth up / down
-SIGNED = re.compile(r"(?<![\w.])([+\-−])\$?\d[\d,]*\.?\d*%?(?:/yr)?")
+# ---- Colour themes (THEME in the workflow env): dark (default), light, paper ----------------------------
+def bgr(rgb, a="00"):
+    return f"&H{a}{rgb[2]:02X}{rgb[1]:02X}{rgb[0]:02X}&"
+
+
+THEMES = {   # bg, text, muted, hairline, accent, accent-light, up text, down text, up bar, down bar, blue bar
+    "dark": dict(bg=(0, 0, 0), ink=(255, 255, 255), muted=(115, 115, 115), line=(38, 38, 38),
+                 acc=(59, 130, 246), acc2=(147, 197, 253), up=(57, 232, 20), down=(239, 68, 68),
+                 bar_up=(120, 205, 120), bar_down=(222, 112, 112), bar_blue=(112, 150, 222), sub=(200, 200, 200)),
+    "light": dict(bg=(255, 255, 255), ink=(17, 24, 39), muted=(107, 114, 128), line=(229, 231, 235),
+                  acc=(37, 99, 235), acc2=(96, 165, 250), up=(22, 163, 74), down=(220, 38, 38),
+                  bar_up=(134, 214, 140), bar_down=(240, 140, 140), bar_blue=(147, 180, 240), sub=(75, 85, 99)),
+    "paper": dict(bg=(246, 243, 236), ink=(15, 32, 64), muted=(120, 113, 105), line=(224, 218, 206),
+                  acc=(30, 64, 175), acc2=(59, 130, 246), up=(21, 128, 61), down=(185, 28, 28),
+                  bar_up=(163, 207, 160), bar_down=(230, 160, 150), bar_blue=(160, 180, 220), sub=(90, 84, 78)),
+}
+THEME = THEMES.get(env("THEME", "paper"), THEMES["paper"])   # paper = the channel's main look
+WHITE, RED, YELLOW = bgr(THEME["ink"]), bgr(THEME["acc"]), bgr(THEME["acc2"])   # ASS: text, highlight, 2nd
+GREEN_ASS, RED_ASS = bgr(THEME["up"]), bgr(THEME["down"])                      # growth up / down
+SIGNED = re.compile(r"(?<![\w.])([+\-−])\$?\d[\d,]*\.?\d*%?(?:/yr)?", re.I)
+ACCENT = "0x%02X%02X%02X" % THEME["acc"]                 # one accent per theme
 ACC_ASS = f"&H00{ACCENT[6:8]}{ACCENT[4:6]}{ACCENT[2:4]}&"
 ACC_RGB = tuple(int(ACCENT[k:k + 2], 16) for k in (2, 4, 6))
 FONT = pathlib.Path("font.ttf")
 FONTS_DIR = str(FONT.resolve().parent) if FONT.exists() else "/usr/share/fonts/truetype/dejavu"
-UP, DOWN, INK, BG, MUTED = (34, 197, 94), (239, 68, 68), (255, 255, 255), (0, 0, 0), (115, 115, 115)
-LINE = (38, 38, 38)                                     # hairlines
+UP, DOWN, INK, BG, MUTED = THEME["up"], THEME["down"], THEME["ink"], THEME["bg"], THEME["muted"]
+LINE = THEME["line"]                                    # hairlines
+COVER_UP, COVER_DOWN, COVER_BLUE = (57, 232, 20), (239, 68, 68), (59, 130, 246)   # cover looks the same on every theme
 
 
 # ---- Shared helpers (same as the other bots) -------------------------------------
@@ -185,8 +207,16 @@ def plain(t):
     return re.sub(r"\[/?[ry]\]", "", str(t)).strip()
 
 
+def caps(t):
+    """Upper-case text but keep the [r]/[y] markers and /yr working."""
+    t = str(t).upper()
+    for m in ("R", "Y"):
+        t = t.replace(f"[{m}]", f"[{m.lower()}]").replace(f"[/{m}]", f"[/{m.lower()}]")
+    return t
+
+
 def to_ass(t):
-    t = str(t).replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ")
+    t = caps(t).replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ")
     t = re.sub(r"\[(r|y)\]([^\[]*?[+\-−]\d[^\[]*?)\[/\1\]", r"\2", t)    # signed numbers get their own colour
     t = SIGNED.sub(lambda m: f"{{\\c{GREEN_ASS if m.group(1) == '+' else RED_ASS}}}{m.group(0)}{{\\c{WHITE}}}", t)
     for tag, col in (("r", RED), ("y", YELLOW)):
@@ -339,8 +369,9 @@ def build_sfx(total, timed, cuts, shots, path):
 
 def render(ass_path, total):
     args = ["-i", "bg.mp4"]
-    fc = [f"[0:v]drawbox=x=0:y={TOP_BAR - 2}:w=1080:h=2:color={ACCENT}@1:t=fill,drawbox=x=0:y={BOT_Y}:w=1080:"
-          f"h=2:color={ACCENT}@1:t=fill,ass={ass_path.resolve()}:fontsdir={FONTS_DIR}[v]"]
+    on = f"enable='gte(t,{COVER_END:.2f})'"
+    fc = [f"[0:v]drawbox=x=0:y={TOP_BAR - 2}:w=1080:h=2:color={ACCENT}@1:t=fill:{on},drawbox=x=0:y={BOT_Y}:w=1080:"
+          f"h=2:color={ACCENT}@1:t=fill:{on},ass={ass_path.resolve()}:fontsdir={FONTS_DIR}[v]"]
     srcs = []                                        # (input args, filter) for each audio layer
     if NARRATION:
         srcs.append((["-i", "voice.mp3"], "highpass=f=90,lowpass=f=8500,deesser=i=0.6"))
@@ -415,6 +446,7 @@ def set_category(c):
     global CATEGORY, LABEL, ACCENT, PLAYLIST, STORY, CAT_TAGS, ACC_ASS, ACC_RGB
     CATEGORY = c
     LABEL, ACCENT, PLAYLIST, STORY, CAT_TAGS = CATEGORIES[c]
+    ACCENT = "0x%02X%02X%02X" % THEME["acc"]
     ACC_ASS = f"&H00{ACCENT[6:8]}{ACCENT[4:6]}{ACCENT[2:4]}&"
     ACC_RGB = tuple(int(ACCENT[k:k + 2], 16) for k in (2, 4, 6))
 
@@ -441,6 +473,13 @@ def fh(path, **params):
     return None
 
 
+def company_news(t, days=3, k=3):
+    """Latest headlines + short summaries for one ticker, as raw facts for the 'why' line."""
+    news = fh("company-news", symbol=t, **{"from": str(US_DATE - dt.timedelta(days=days)), "to": str(US_DATE)}) or []
+    out = [f"{n['headline']} ({str(n.get('summary', ''))[:220]})" for n in news[:k] if n.get("headline")]
+    return " | ".join(out) or "none"
+
+
 def tickers(sector):
     return [t for t, (_, s) in UNIVERSE.items() if sector == "All" or s == sector]
 
@@ -453,9 +492,15 @@ def money(x):
     return f"${x:,.2f}"
 
 
+QUOTES = {}
+
+
 def quote(t):
-    q = fh("quote", symbol=t) or {}
-    return q if q.get("c") and q.get("dp") is not None else None
+    """Latest quote, cached per run so every slide shows the same number."""
+    if t not in QUOTES:
+        q = fh("quote", symbol=t) or {}
+        QUOTES[t] = q if q.get("c") and q.get("dp") is not None else None
+    return QUOTES[t]
 
 
 def metrics(sector):
@@ -483,22 +528,29 @@ def data_movers():
     if len(qs) < 20 or max(abs(q["dp"]) for q in qs.values()) < 0.3:   # weekend / holiday / no data
         return None
     ranked = sorted(qs, key=lambda t: qs[t]["dp"])
-    pick = ranked[::-1][:2] + ranked[:2]                                  # 2 winners, 2 losers
+    avg = sum(q["dp"] for q in qs.values()) / len(qs)                    # the whole basket decides the story
+    global DAY_WORD
+    DAY_WORD = "GAINERS" if avg >= 0 else "TANKERS"                       # shown above the 4 stock cards
+    pick = ranked[::-1][:4] if avg >= 0 else ranked[:4]                   # top 4 gainers (or losers)
     items = []
     for t in pick:
-        news = fh("company-news", symbol=t, **{"from": str(US_DATE - dt.timedelta(days=2)), "to": str(US_DATE)}) or []
-        heads = [n.get("headline", "") for n in news[:4] if n.get("headline")]
+        heads = company_news(t, days=2)
         q = qs[t]
         items.append({"ticker": t, "name": UNIVERSE[t][0], "main": money(q["c"]),
                       "badge": (pct(q["dp"]), UP if q["dp"] >= 0 else DOWN),
                       "rows": [("Day range", f"{money(q['l'])} - {money(q['h'])}"), ("Previous close", money(q["pc"]))],
                       "bar": q["dp"], "bar_txt": pct(q["dp"]),
                       "fact": f"{t} ({UNIVERSE[t][0]}): closed at {money(q['c'])}, {pct(q['dp'])} today. "
-                              f"News headlines: {' | '.join(heads) or 'none'}"})
-    avg = sum(q["dp"] for q in qs.values()) / len(qs)                    # the whole basket, not just the 4
+                              f"Recent news: {heads}"})
     mood = "positive" if avg >= 0.4 else "negative" if avg <= -0.4 else "neutral"
+    tech = [{"ticker": t, "bar": qs[t]["dp"], "bar_txt": pct(qs[t]["dp"])} for t in TOP_TECH if t in qs]
+    spy = quote("SPY")
+    bench = f"S&P 500 (SPY) was {pct(spy['dp'])} today" if spy else US_DATE.strftime("%b %d, %Y")
+    extra = "Top tech stocks today: " + ", ".join(f"{x['ticker']} {x['bar_txt']}" for x in tech) + \
+        (f". S&P 500 (SPY) {pct(spy['dp'])} today" if spy else "")
     return {"items": items, "key": f"movers {US_DATE}", "sub": US_DATE.strftime("%b %d, %Y"),
-            "board": "Today's change", "mood": mood}
+            "board": "Top tech stocks today", "board_items": tech, "board_sub": bench, "extra": extra,
+            "mood": mood}
 
 
 def data_news():
@@ -549,7 +601,7 @@ def data_pe():
         items.append({"ticker": t, "name": UNIVERSE[t][0], "main": f"P/E {pes[t]:.1f}", "rows": rows,
                       "bar": pes[t], "bar_txt": f"{pes[t]:.1f}",
                       "fact": f"{t} ({UNIVERSE[t][0]}, {UNIVERSE[t][1]}): P/E {pes[t]:.1f}; "
-                              + "; ".join(f"{k} {v}" for k, v in rows)})
+                              + "; ".join(f"{k} {v}" for k, v in rows) + f". Recent news: {company_news(t, days=14, k=2)}"})
     return {"items": items, "key": f"pe {sector} {US_DATE:%Y-%m}", "sub": f"Sector: {sector}", "board": "P/E ratio"}
 
 
@@ -578,7 +630,7 @@ def data_month():
                                ("Earnings", when)],
                       "bar": share, "bar_txt": f"{share}%",
                       "fact": f"{t} ({UNIVERSE[t][0]}): {share}% of {total} analysts rate it Buy or Strong Buy "
-                              f"({r.get('strongBuy', 0)} Strong Buy); next earnings: {when}"})
+                              f"({r.get('strongBuy', 0)} Strong Buy); next earnings: {when}" + f". Recent news: {company_news(t, days=14, k=2)}"})
     return {"items": items, "key": f"month {sector} {US_DATE:%Y-%m}", "sub": f"{US_DATE:%B %Y} · {sector}",
             "board": "Analysts rating Buy"}
 
@@ -602,9 +654,9 @@ def data_y2030():
                       "fact": f"{t} ({UNIVERSE[t][0]}): revenue grew {g[t]:.1f}% per year over 5 years"
                               + (f", EPS {eps:.1f}% per year" if eps else "")
                               + f"; if that pace continued for {years} more years revenue would be x{mult:.1f} by 2030 "
-                                "(hypothetical, not a forecast)"})
+                                "(hypothetical, not a forecast)" + f". Recent news: {company_news(t, days=14, k=2)}"})
     return {"items": items, "key": f"y2030 {sector} {US_DATE:%Y-%m}", "sub": f"Sector: {sector}",
-            "board": "Revenue growth per year (5 yrs)"}
+            "board": "5-year revenue growth per year"}
 
 
 DATA = {"movers": data_movers, "news": data_news, "pe": data_pe, "month": data_month, "y2030": data_y2030}
@@ -637,7 +689,8 @@ def numbers_ok(lines, facts):
 
 def gen_script(d):
     n = len(d["items"])
-    facts = "\n".join(f"ITEM {i + 1}: {it['fact']}" for i, it in enumerate(d["items"]))
+    facts = "\n".join(f"ITEM {i + 1}: {it['fact']}" for i, it in enumerate(d["items"])) + \
+        (f"\nMARKET CONTEXT (for the last line only): {d['extra']}" if d.get("extra") else "")
     rules = {
         "pe": "- One line must say a low P/E can mean the market expects trouble (a value trap).\n",
         "y2030": "- Say clearly the 2030 numbers are 'if this pace continued', never a prediction.\n",
@@ -649,8 +702,14 @@ def gen_script(d):
         f"never invent or round differently):\n{facts}\nRules:\n"
         "- headline: the hook, max 7 words, spoken first and shown the whole time; a number or a contradiction; "
         "must not reveal the final takeaway. Never start with 'Did you know'.\n"
-        f"- lines: exactly {n + 1} narration lines, max 12 words each. Line k (1..{n}) is about ITEM k, in order: "
-        "name the company, its key number, and the reason or meaning from the facts. "
+        f"- lines: exactly {n + 1} narration lines, max 12 words each. Line k (1..{n}) is about ITEM k, in order. "
+        "Line k may use ONLY ITEM k's own facts and recent news, never another item's news; every stock has its "
+        "own reason, so all item lines must be different. "
+        "The screen already shows the ticker, company name, price and its % move, so a line must NOT repeat them "
+        "and must NOT say 'moved' or 'on the news'. Instead state the concrete CAUSE or driver from that item's "
+        "facts and recent news, short and specific, with a number if the facts have one (style example: "
+        "'New Apple subscriptions deal; $5.5B free cash flow'). If the facts give no clear cause, say it honestly "
+        "(e.g. 'No company news; the whole sector fell'). Never invent a cause. "
         f"Line {n + 1} is the single most important takeaway or risk.\n"
         "- NEVER tell viewers to buy, sell or hold anything, and never give your own price predictions. "
         "Do not copy news sentences; say it in your own words.\n" + rules +
@@ -661,9 +720,19 @@ def gen_script(d):
         "- title: up to 70 characters with a number, honest, no markers.\n"
         'Return JSON: {"title": "...", "headline": "...", "lines": ["..."], "question": "...", "tags": ["5-8 tags"]}')
     ok = lambda x: isinstance(x, dict) and x.get("headline") and len(x.get("lines", [])) == n + 1
+    def distinct(lines):
+        """No two stock lines may share most of their words (each stock needs its own cause)."""
+        sets = [set(re.findall(r"[a-z]{4,}", plain(l).lower())) for l in lines[:n]]
+        for a in range(len(sets)):
+            for b in range(a + 1, len(sets)):
+                if sets[a] and len(sets[a] & sets[b]) / len(sets[a] | sets[b]) > 0.5:
+                    print("lines too similar:", lines[a], "|", lines[b])
+                    return False
+        return True
+
     for _ in range(3):
         data = gemini(prompt, ok)
-        if numbers_ok([data["headline"]] + data["lines"], facts):
+        if numbers_ok([data["headline"]] + data["lines"], facts) and distinct(data["lines"]):
             return data
     raise SystemExit("Script kept using numbers that are not in the data")
 
@@ -717,12 +786,58 @@ def slide_title(d0, path):
     im.save(path)
 
 
+LOGOS = {}
+
+
+def logo_for(t):
+    """Company logo from the Finnhub company profile (as provided by the data feed); None if unavailable."""
+    if t in LOGOS:
+        return LOGOS[t]
+    LOGOS[t] = None
+    if re.fullmatch(r"[A-Z.]{1,6}", t):
+        url = (fh("stock/profile2", symbol=t) or {}).get("logo")
+        if url:
+            try:
+                r = requests.get(url, timeout=30)
+                r.raise_for_status()
+                p = W / f"logo_{t}.img"
+                p.write_bytes(r.content)
+                from PIL import Image
+                Image.open(p).verify()
+                LOGOS[t] = p
+            except Exception as e:
+                print("logo skipped:", t, type(e).__name__)
+    return LOGOS[t]
+
+
+def logo_badge(t, height):
+    """Logo on a white rounded badge (readable on black), sized to the logo's shape; None if no logo."""
+    from PIL import Image, ImageDraw
+    p = logo_for(t)
+    if not p:
+        return None
+    try:
+        lg = Image.open(p).convert("RGBA")
+    except Exception:
+        return None
+    pad = int(height * .14)
+    lg.thumbnail((int(height * 3.2), height - 2 * pad), Image.LANCZOS)
+    badge = Image.new("RGBA", (lg.width + 2 * pad, height), (0, 0, 0, 0))
+    ImageDraw.Draw(badge).rounded_rectangle([0, 0, badge.width - 1, height - 1], radius=height // 5,
+                                            fill=(255, 255, 255, 255), outline=LINE + (255,), width=2)
+    badge.alpha_composite(lg, (pad, (height - lg.height) // 2))
+    return badge
+
+
 def slide_card(it, i, n, path):
     im, d = canvas()
     d.text((145, 36), f"{i}/{n}", font=font(30, False), fill=MUTED)       # next to the blue rule
     d.text((70, 120), it["ticker"], font=font(120), fill=INK)
+    badge = logo_badge(it["ticker"], 120) if re.fullmatch(r"[A-Z.]{1,6}", it["ticker"]) else None
+    if badge:                                                                # company logo, top right
+        im.paste(badge, (1010 - badge.width, 130), badge)
     y = 270
-    for line in wrap(d, it["name"], font(48, False), 920)[:2]:
+    for line in wrap(d, str(it["name"]).upper(), font(48, False), 920 if not badge else 1010 - badge.width - 110)[:2]:
         d.text((74, y), line, font=font(48, False), fill=MUTED if it.get("main") else INK)
         y += 60
     if it.get("main"):
@@ -739,31 +854,189 @@ def slide_card(it, i, n, path):
                font=font(52), fill=col)
         y += 110
     for k, v in it.get("rows", []):
-        d.text((74, y + 10), k, font=font(36, False), fill=MUTED)
+        d.text((74, y + 10), k.upper(), font=font(34, False), fill=MUTED)
         d.text((1010 - d.textlength(v, font=font(40)), y + 6), v, font=font(40), fill=tone(v))
         d.line([(74, y + 62), (1010, y + 62)], fill=LINE, width=2)
         y += 72
     im.save(path)
 
 
+BAR_UP, BAR_DOWN, BAR_BLUE = THEME["bar_up"], THEME["bar_down"], THEME["bar_blue"]   # softer chart colours
+
+
 def slide_board(d0, path):
-    im, d = canvas()
-    d.text((70, 90), d0["board"], font=font(44), fill=INK)
-    items = d0["items"]
+    """Ranking like a classic bar infographic: centered title, bars from the left, bold value inside the
+    bar's end, company logo (or ticker) right after the bar. Black background."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1080, MID_H), BG)
+    d = ImageDraw.Draw(im)
+    title, size = d0["board"].upper(), 54
+    while d.textlength(title, font=font(size)) > 980 and size > 32:
+        size -= 2
+    d.text(((1080 - d.textlength(title, font=font(size))) / 2, 72), title, font=font(size), fill=INK)   # below the brand
+    sub = str(d0.get("board_sub") or d0.get("sub", "")).upper()
+    d.text(((1080 - d.textlength(sub, font=font(30, False))) / 2, 142), sub, font=font(30, False), fill=THEME["sub"])
+    items = sorted(d0.get("board_items") or d0["items"], key=lambda it: it["bar"],
+                   reverse=CATEGORY != "pe")                                   # P/E: cheapest on top
     vmax = max(abs(it["bar"]) for it in items) or 1
-    neg = any(it["bar"] < 0 for it in items)
-    x_zero = 540 if neg else 270
-    span = 1010 - x_zero - 160                          # room for the value label
+    x0, tag_w = 30, 290
+    span = 1050 - x0 - tag_w
+    top = 205
+    gap = (MID_H - top - 20) // max(1, len(items))
+    bh = min(120, int(gap * .8))
+    vf = font(int(min(bh * .55, 52)))
     for k, it in enumerate(items):
-        y = 190 + k * 140
-        col = (UP if it["bar"] >= 0 else DOWN) if CATEGORY in ("movers", "y2030") else ACC_RGB
-        w = int(span * abs(it["bar"]) / vmax)
-        x1, x2 = (x_zero, x_zero + w) if it["bar"] >= 0 else (x_zero - w, x_zero)
-        d.rectangle([x1, y + 25, max(x2, x1 + 4), y + 65], fill=col)
-        d.text((70 if not neg or it["bar"] >= 0 else x_zero + 20, y + 18), it["ticker"], font=font(48), fill=INK)
-        tx = x2 + 20 if it["bar"] >= 0 else x1 - 20 - d.textlength(it["bar_txt"], font=font(44))
-        d.text((tx, y + 22), it["bar_txt"], font=font(44), fill=tone(it["bar_txt"]))
+        y = top + k * gap
+        col = (BAR_UP if it["bar"] >= 0 else BAR_DOWN) if CATEGORY in ("movers", "y2030") else BAR_BLUE
+        txt = it["bar_txt"]
+        w = max(int(span * abs(it["bar"]) / vmax), int(d.textlength(txt, font=vf)) + 50)
+        d.rounded_rectangle([x0, y, x0 + w, y + bh], radius=6, fill=col)
+        d.text((x0 + w - 22 - d.textlength(txt, font=vf), y + (bh - vf.size) / 2 - 3), txt, font=vf, fill=(0, 0, 0))
+        badge = logo_badge(it["ticker"], int(bh * .78)) if re.fullmatch(r"[A-Z.]{1,6}", it["ticker"]) else None
+        if badge:
+            im.paste(badge, (x0 + w + 16, y + (bh - badge.height) // 2), badge)
+        else:
+            tf = font(int(min(bh * .55, 52)))
+            d.text((x0 + w + 18, y + (bh - tf.size) / 2 - 3), it["ticker"], font=tf, fill=INK)
     im.save(path)
+
+
+# ---- Cover (first seconds): illustrated market background + tag + big headline ---------------------------
+COND_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"
+NAVY, NAVY2 = (6, 18, 40), (14, 40, 84)
+
+
+def cond_font(size):
+    from PIL import ImageFont
+    for p in ([str(FONT)] if FONT.exists() else []) + [COND_FONT, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+        try:
+            return ImageFont.truetype(p, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def cover_background(mood, seed):
+    """Original illustration: night skyline, candlesticks, rising bars and a glowing arrow (down if bad news)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    rnd = random.Random(seed)
+    W_, H_ = 1080, 1920
+    up = mood != "negative"
+    col = COVER_UP if mood == "positive" else COVER_DOWN if mood == "negative" else COVER_BLUE
+    im = Image.new("RGB", (W_, H_), NAVY)
+    d = ImageDraw.Draw(im)
+    for y in range(H_):                                   # night-sky gradient
+        k = y / H_
+        d.line([(0, y), (W_, y)], fill=tuple(int(NAVY2[c] * (1 - k) + NAVY[c] * k) for c in range(3)))
+    for x in range(0, W_, 60):                            # faint data grid
+        d.line([(x, 0), (x, H_)], fill=(20, 48, 92), width=1)
+    for y in range(0, H_, 60):
+        d.line([(0, y), (W_, y)], fill=(20, 48, 92), width=1)
+    # skyline silhouette with lit windows
+    x = -20
+    while x < W_:
+        w, h = rnd.randint(70, 160), rnd.randint(380, 980)
+        top = 1350 - h
+        d.rectangle([x, top, x + w, 1400], fill=(10, 22, 44))
+        for wy in range(top + 20, 1340, 34):
+            for wx in range(x + 12, x + w - 14, 26):
+                if rnd.random() < 0.35:
+                    d.rectangle([wx, wy, wx + 10, wy + 16], fill=(70, 110, 170) if rnd.random() < .8 else (230, 200, 120))
+        x += w + rnd.randint(4, 20)
+    # candlesticks across the sky, trending with the mood
+    glow = Image.new("RGB", (W_, H_), (0, 0, 0))
+    g = ImageDraw.Draw(glow)
+    price = 900 if up else 350
+    for i in range(26):
+        cx = 60 + i * 38
+        step = rnd.uniform(-38, 12) if up else rnd.uniform(-12, 38)
+        o, c = price, price + step
+        green = c < o
+        hi, lo = min(o, c) - rnd.uniform(8, 40), max(o, c) + rnd.uniform(8, 40)
+        cc = COVER_UP if green else COVER_DOWN
+        d.line([(cx, hi), (cx, lo)], fill=cc, width=3)
+        d.rectangle([cx - 11, min(o, c), cx + 11, max(o, c) + 3], fill=cc)
+        g.rectangle([cx - 11, min(o, c), cx + 11, max(o, c) + 3], fill=cc)
+        price = c
+    # rising (or falling) bars at the bottom of the art
+    for i in range(10):
+        bh = (90 + i * 45 if up else 520 - i * 45) + rnd.randint(-20, 20)
+        bx = 560 + i * 50
+        d.rectangle([bx, 1380 - bh, bx + 34, 1380], fill=tuple(int(v * .75) for v in col))
+        g.rectangle([bx, 1380 - bh, bx + 34, 1380], fill=tuple(int(v * .5) for v in col))
+    # big zigzag arrow
+    pts = [(40, 1250), (230, 1080), (330, 1170), (520, 900), (620, 990), (860, 520)] if up else \
+          [(40, 420), (230, 600), (330, 510), (520, 790), (620, 700), (860, 1160)]
+    for layer, wdt in ((g, 70), (d, 34)):
+        layer.line(pts, fill=col, width=wdt, joint="curve")
+    (x1, y1), (x2, y2) = pts[-2], pts[-1]
+    ang = math.atan2(y2 - y1, x2 - x1)
+    tip = (x2 + 70 * math.cos(ang), y2 + 70 * math.sin(ang))
+    head = [tip, (x2 + 60 * math.cos(ang + 2.1), y2 + 60 * math.sin(ang + 2.1)),
+            (x2 + 60 * math.cos(ang - 2.1), y2 + 60 * math.sin(ang - 2.1))]
+    for layer in (g, d):
+        layer.polygon(head, fill=col)
+    glow = glow.filter(ImageFilter.GaussianBlur(28))
+    im = Image.blend(im, Image.composite(glow, im, glow.convert("L")), 1.0)
+    from PIL import ImageChops
+    im = ImageChops.add(im, glow, scale=1.4)
+    return im
+
+
+def make_cover(headline, label, mood, path):
+    """Layout of a news card: art on top, dark fade, coloured tag, big two-colour headline, channel name."""
+    from PIL import Image, ImageDraw
+    col = COVER_UP if mood == "positive" else COVER_DOWN if mood == "negative" else COVER_BLUE
+    im = cover_background(mood, seed=len(headline) * 7 + FILE_NO)
+    shade = Image.new("L", (1080, 1920), 0)                # fade to black over the lower part
+    sd = ImageDraw.Draw(shade)
+    for y in range(1920):
+        sd.line([(0, y), (1080, y)], fill=int(255 * min(1, max(0, (y - 900) / 520)) ** 1.2))
+    im = Image.composite(Image.new("RGB", im.size, (0, 0, 0)), im, shade)
+    d = ImageDraw.Draw(im)
+    d.text((60, 70), CHANNEL, font=font(34), fill=(220, 225, 235))          # small top-left brand
+    # headline: [r]...[/r] part in the mood colour, rest white; auto-size to fit 4 lines
+    parts = re.split(r"(\[r\].*?\[/r\])", caps(headline))
+    words = []
+    for p in parts:
+        hot = p.startswith("[r]")
+        words += [(w, hot) for w in plain(p).split()]
+    if not any(h for _, h in words):                       # nothing marked: colour the first half
+        words = [(w, k < max(1, len(words) // 2)) for k, (w, _) in enumerate(words)]
+    for size in (104, 96, 88, 80, 72):
+        hf = cond_font(size)
+        lines, cur = [], []
+        for w in words:
+            if cur and d.textlength(" ".join(x for x, _ in cur + [w]), font=hf) > 960:
+                lines.append(cur)
+                cur = []
+            cur.append(w)
+        lines.append(cur)
+        if len(lines) <= 4:
+            break
+    line_h = int(size * 1.12)
+    y0 = 1790 - len(lines) * line_h - 110                  # block ends just above the disclaimer
+    # tag: icon box + coloured label
+    tf = cond_font(52)
+    tw = d.textlength(label, font=tf)
+    d.rectangle([60, y0, 132, y0 + 72], outline=col, width=4)
+    for k, hgt in enumerate((18, 32, 46)):
+        d.rectangle([74 + k * 18, y0 + 58 - hgt, 86 + k * 18, y0 + 58], fill=col)
+    d.rectangle([150, y0, 150 + tw + 44, y0 + 72], fill=col)
+    d.text((172, y0 + 6), label, font=tf, fill=(255, 255, 255))
+    y = y0 + 100
+    for line in lines:
+        x = 60
+        for w, hot in line:
+            d.text((x, y), w, font=hf, fill=col if hot else (255, 255, 255))
+            x += d.textlength(w + " ", font=hf)
+        y += line_h
+    d.text((60, 1840), "NOT FINANCIAL ADVICE", font=font(26, False), fill=(120, 125, 135))
+    im.save(path)
+
+
+TAGS = {"movers": "MARKET MOVERS", "news": "STOCK MARKET", "pe": "VALUE STOCKS",
+        "month": "ANALYSTS' PICKS", "y2030": "GROWTH STOCKS"}
 
 
 # ---- Timing, shots, captions ---------------------------------------------------
@@ -783,8 +1056,8 @@ def line_times(data, words, total):
 
 def build_slides(d0, timed, total):
     """Title while the hook is spoken, one card per item line, the comparison board on the last line."""
-    paths = [(W / "s_title.png").resolve()]
-    slide_title(d0, paths[0])
+    paths = [(W / "s_cover.png").resolve()]
+    make_cover(HEADLINE, TAGS.get(CATEGORY, "STOCK MARKET"), d0.get("mood", "neutral"), paths[0])
     n = len(d0["items"])
     for i, it in enumerate(d0["items"], 1):
         paths.append((W / f"s_{i}.png").resolve())
@@ -800,16 +1073,22 @@ def build_slides(d0, timed, total):
         img = paths[k] if k < len(paths) else last
         if k == len(starts) - 1:
             img = last
-        shots.append({"kind": "single", "imgs": [img], "dur": max(0.4, end - starts[k])})
+        shots.append({"kind": "cover" if k == 0 else "single", "imgs": [img], "dur": max(0.4, end - starts[k])})
     return shots
 
 
 def render_shot(i, sh):
     fr = int(sh["dur"] * 30) + 2
+    if sh["kind"] == "cover":                            # full frame, slow push-in
+        ff("-loop", "1", "-framerate", "30", "-i", str(sh["imgs"][0]), "-filter_complex",
+           f"[0:v]scale=2160:3840,zoompan=z='1+0.04*on/{fr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:"
+           "s=1080x1920:fps=30,setsar=1,format=yuv420p[v]", "-map", "[v]", "-t", f"{sh['dur']:.3f}", *x264(20),
+           f"shot{i}.mp4")
+        return f"shot{i}.mp4"
     z = f"1+0.05*on/{fr}" if i % 2 == 0 else f"1.05-0.05*on/{fr}"
     ff("-loop", "1", "-framerate", "30", "-i", str(sh["imgs"][0]), "-filter_complex",
        f"[0:v]scale=2160:{MID_H * 2},zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:"
-       f"s=1080x{MID_H}:fps=30,setsar=1,format=yuv420p,pad=1080:1920:0:{TOP_BAR}:black[v]",
+       f"s=1080x{MID_H}:fps=30,setsar=1,format=yuv420p,pad=1080:1920:0:{TOP_BAR}:0x{BG[0]:02X}{BG[1]:02X}{BG[2]:02X}[v]",
        "-map", "[v]", "-t", f"{sh['dur']:.3f}", *x264(20), f"shot{i}.mp4")
     return f"shot{i}.mp4"
 
@@ -834,19 +1113,57 @@ def build_ass(data, timed, total):
              style("Label", 40, ACC_ASS, 6, 0, 0, 8, 60, 60, 125),
              style("Head", 76, WHITE, 1, 0, 0, 8, 60, 60, 185),
              style("Body", 58, WHITE, 0, 0, 0, 8, 170, 170, BOT_Y + 35),
-             style("Brand", 30, "&H50FFFFFF&", 4, 3, 0, 9, 0, 28, TOP_BAR + 18),
+             style("Brand", 30, bgr(THEME["ink"], "50"), 4, 3 if sum(BG) < 200 else 0, 0, 9, 0, 28, TOP_BAR + 18),
              "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-             ev(0, 0, total, "Label", f"{LABEL}  ·  #{FILE_NO}"),
-             ev(0, 0, total, "Head", "{\\fad(200,0)}" + to_ass(data["headline"])),
-             ev(3, 0, total, "Brand", CHANNEL)]
+             ev(0, COVER_END, total, "Label", f"{LABEL}  ·  #{FILE_NO}"),
+             *top_events(data, timed, total, ev),
+             ev(3, COVER_END, total, "Brand", CHANNEL)]
     lines += [ev(1, s, e, "Body", "{\\fad(120,60)}" + to_ass(text)) for text, s, e in timed]
     path = W / "subs.ass"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
+DAY_WORD = "GAINERS"
+TOPBAR = env("TOPBAR", "chapter")                       # chapter | market: what sits above slides 2-3
+D0 = {}
+
+
+def chapters(d0):
+    """Two-line title per narration line (blue line + white line, same look as before): what THIS slide is."""
+    items, out, g, l = d0["items"], [], 0, 0
+    for i, it in enumerate(items, 1):
+        if CATEGORY == "movers":
+            out.append((DAY_WORD, "OF THE DAY"))
+        else:
+            out.append({"news": (f"STORY {i}", f"OF {len(items)}"), "pe": (f"CHEAPEST #{i}", "BY P/E RATIO"),
+                        "month": (f"ANALYSTS' PICK #{i}", "THIS MONTH"),
+                        "y2030": (f"FASTEST GROWER #{i}", "OVER 5 YEARS")}.get(CATEGORY, (f"#{i}", "")))
+    out.append({"movers": ("TECH", "SCOREBOARD"), "news": ("WHAT IT", "MEANS")}.get(CATEGORY, ("THE FULL", "RANKING")))
+    return out
+
+
+def market_strip():
+    """Index ETFs as a market bar: SPY (S&P 500) and QQQ (Nasdaq 100)."""
+    parts = [f"{t} {pct(q['dp'])}" for t in ("SPY", "QQQ") if (q := quote(t))]
+    return "   ".join(parts)
+
+
+def top_events(data, timed, total, ev):
+    """Text above slides 2-3 (instead of repeating the cover headline), in the same two-line style."""
+    two = lambda a, b: "{\\fad(150,0)}" + to_ass(f"[r]{a}[/r]") + ("\\N" + to_ass(b) if b else "")
+    if TOPBAR == "market":
+        strip = market_strip()
+        if strip:
+            return [ev(0, COVER_END, total, "Head", two("MARKET TODAY", strip))]
+    titles = chapters(D0) if D0 else []
+    return [ev(0, s, e, "Head", two(*titles[k]) if k < len(titles) else "")
+            for k, (_, s, e) in enumerate(timed)]
+
+
 def make_video(data, d0):
-    global MUSIC
+    global MUSIC, D0
+    D0 = d0
     mood = d0.get("mood", "neutral")                     # P/E, analysts, 2030 = neutral facts
     global MUSIC_START
     MUSIC = mood_track(mood) or MUSIC
@@ -860,6 +1177,8 @@ def make_video(data, d0):
         words = tighten(W / "voice.mp3", asyncio.run(_tts(spoken, W / "voice.mp3")))
         total = min(MAX_SEC, max(MIN_SEC, probe_duration(W / "voice.mp3") + 0.3))
     timed = line_times(data, words, total)
+    global HEADLINE, COVER_END
+    HEADLINE, COVER_END = data["headline"], timed[0][1] if timed else 2.5
     shots = build_slides(d0, timed, total)
     build_background(shots)
     if SFX:
