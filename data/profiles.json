@@ -12,5 +12,12 @@
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CVX.png",
   "mcap": 418823.9935465562,
   "fetched": "2026-10-11"
+ },
+ "AMC": {
+  "name": "AMC Entertainment Holdings Inc",
+  "shares": 892.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMC.png",
+  "mcap": 2659.961855965278,
+  "fetched": "2026-10-11"
  }
 }
