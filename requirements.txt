@@ -1,5 +1,6 @@
 edge-tts
 requests
 pillow
+numpy
 google-api-python-client
 google-auth-oauthlib

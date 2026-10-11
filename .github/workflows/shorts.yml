@@ -1,16 +1,48 @@
 name: shorts
 on:
   schedule:
-    - cron: "7 14,17 * * *"        # 2 videos every day: lowest P/E / analysts' picks / 2030 potential
-    - cron: "15 22 * * 1-5"        # after the US close: biggest movers
-    - cron: "40 23 * * 1-5"        # market news of the day
+    # Videos go out at about 23:00, 00:00, 01:00 and 07:00 London time, all year.
+    # Runs start at :47 of the hour before (GitHub starts late + a few minutes to make and upload).
+    # Cron is UTC, so summer (BST) and winter (GMT) hours are both listed; the gate keeps the right ones.
+    - cron: "47 21,22,23,0,5,6 * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1 = make the video without uploading (download it from Artifacts)"
+        default: "0"
+      series:
+        description: "time_machine / peak / battle / shock (empty = automatic)"
+        default: ""
+      ticker:
+        description: "e.g. NVDA, or two for a battle: AAPL,MSFT (empty = automatic)"
+        default: ""
 permissions:
   contents: write
+concurrency:
+  group: shorts
+  cancel-in-progress: false
 jobs:
-  run:
+  gate:                           # is this one of the London slots? (manual runs always pass)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime, timedelta, timezone
+          from zoneinfo import ZoneInfo
+          # GitHub may start late: go back to the planned :47 slot before converting to London time
+          slot = (datetime.now(timezone.utc) - timedelta(minutes=47)).replace(minute=47, second=0, microsecond=0)
+          london = slot.astimezone(ZoneInfo("Europe/London")).hour
+          print("go=1" if london in (22, 23, 0, 6) else "go=0")
+          PY
+  run:
+    needs: gate
+    if: needs.gate.outputs.go == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,14 +52,29 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python shorts.py
         env:
+          DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+          SERIES: ${{ github.event.inputs.series }}
+          TICKER: ${{ github.event.inputs.ticker }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-      - run: |
+      - if: always() && github.event.inputs.dry_run == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: |
+            work/final.mp4
+            work/metadata.json
+      - if: always()
+        run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add used.json
-          git commit -m "update used" || true
-          git push
+          git add used.json || true
+          git add data || true
+          git commit -m "update state" || true
+          git pull --rebase || true
+          git push || true

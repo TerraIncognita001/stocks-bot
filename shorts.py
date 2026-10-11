@@ -1,396 +1,2161 @@
-import array, asyncio, datetime as dt, json, math, os, pathlib, random, re, subprocess, time, wave
+#!/usr/bin/env python3
+"""Bull & Bear Daily v2 - data-story YouTube Shorts about famous stocks.
+
+Series
+  time_machine  "$1,000 in <company>, N years ago"  - growth chart + live counter, reveal at the end
+  peak          "$1,000 at <company>'s very top"    - the same engine, a loss story
+  battle        "$1,000 in A vs $1,000 in B"        - two lines race, winner at the end
+  shock         "<company> just lost $X billion"    - today's biggest market-cap move, in dollars
+
+Every number on screen and in the voice-over is computed from price data; the LLM only words it
+and its text is checked. Frames are drawn with Pillow and piped straight into ffmpeg.
+"""
+import asyncio
+import datetime as dt
+import functools
+import json
+import math
+import os
+import pathlib
+import random
+import re
+import subprocess
+import time
+import wave
+from collections import Counter
+
+import numpy as np
 import requests
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-W = pathlib.Path("work")
-W.mkdir(exist_ok=True)
-USED = pathlib.Path("used.json")
-used = json.loads(USED.read_text(encoding="utf-8")) if USED.exists() else []
 env = os.getenv
+WORK = pathlib.Path(env("WORK_DIR", "work"))
+WORK.mkdir(parents=True, exist_ok=True)
+DATA = pathlib.Path("data")
+PRICE_DIR, LOGO_DIR = DATA / "prices", WORK / "logos"
+PROFILE_FILE = DATA / "profiles.json"
+STATE_FILE = pathlib.Path(env("STATE_FILE", "used.json"))
+FONT_DIR = pathlib.Path("fonts")
+MUSIC_DIR = pathlib.Path("music")
 
-# ---- Universe: large, well-known US stocks (ticker: name, sector) ----------------------------------------
-UNIVERSE = {
-    "AAPL": ("Apple", "Tech"), "MSFT": ("Microsoft", "Tech"), "NVDA": ("Nvidia", "Tech"),
-    "GOOGL": ("Alphabet", "Tech"), "META": ("Meta", "Tech"), "AVGO": ("Broadcom", "Tech"),
-    "ORCL": ("Oracle", "Tech"), "AMD": ("AMD", "Tech"), "INTC": ("Intel", "Tech"), "CRM": ("Salesforce", "Tech"),
-    "ADBE": ("Adobe", "Tech"), "CSCO": ("Cisco", "Tech"), "QCOM": ("Qualcomm", "Tech"), "IBM": ("IBM", "Tech"),
-    "TXN": ("Texas Instruments", "Tech"), "MU": ("Micron", "Tech"), "PLTR": ("Palantir", "Tech"),
-    "NFLX": ("Netflix", "Tech"), "UBER": ("Uber", "Tech"), "SHOP": ("Shopify", "Tech"),
-    "AMZN": ("Amazon", "Consumer"), "TSLA": ("Tesla", "Consumer"), "WMT": ("Walmart", "Consumer"),
-    "COST": ("Costco", "Consumer"), "HD": ("Home Depot", "Consumer"), "MCD": ("McDonald's", "Consumer"),
-    "NKE": ("Nike", "Consumer"), "SBUX": ("Starbucks", "Consumer"), "KO": ("Coca-Cola", "Consumer"),
-    "PEP": ("PepsiCo", "Consumer"), "PG": ("Procter & Gamble", "Consumer"), "DIS": ("Disney", "Consumer"),
-    "TGT": ("Target", "Consumer"), "F": ("Ford", "Consumer"), "GM": ("General Motors", "Consumer"),
-    "JPM": ("JPMorgan", "Finance"), "BAC": ("Bank of America", "Finance"), "WFC": ("Wells Fargo", "Finance"),
-    "C": ("Citigroup", "Finance"), "GS": ("Goldman Sachs", "Finance"), "MS": ("Morgan Stanley", "Finance"),
-    "V": ("Visa", "Finance"), "MA": ("Mastercard", "Finance"), "AXP": ("American Express", "Finance"),
-    "PYPL": ("PayPal", "Finance"), "BLK": ("BlackRock", "Finance"), "SCHW": ("Charles Schwab", "Finance"),
-    "UNH": ("UnitedHealth", "Healthcare"), "JNJ": ("Johnson & Johnson", "Healthcare"),
-    "LLY": ("Eli Lilly", "Healthcare"), "PFE": ("Pfizer", "Healthcare"), "MRK": ("Merck", "Healthcare"),
-    "ABBV": ("AbbVie", "Healthcare"), "TMO": ("Thermo Fisher", "Healthcare"), "ABT": ("Abbott", "Healthcare"),
-    "BMY": ("Bristol-Myers Squibb", "Healthcare"), "CVS": ("CVS Health", "Healthcare"),
-    "AMGN": ("Amgen", "Healthcare"), "GILD": ("Gilead", "Healthcare"),
-    "XOM": ("ExxonMobil", "Energy & Industry"), "CVX": ("Chevron", "Energy & Industry"),
-    "COP": ("ConocoPhillips", "Energy & Industry"), "OXY": ("Occidental", "Energy & Industry"),
-    "BA": ("Boeing", "Energy & Industry"), "CAT": ("Caterpillar", "Energy & Industry"),
-    "GE": ("GE Aerospace", "Energy & Industry"), "LMT": ("Lockheed Martin", "Energy & Industry"),
-    "RTX": ("RTX", "Energy & Industry"), "UPS": ("UPS", "Energy & Industry"), "DE": ("Deere", "Energy & Industry"),
-    "HON": ("Honeywell", "Energy & Industry"), "NEE": ("NextEra Energy", "Energy & Industry"),
-    "T": ("AT&T", "Energy & Industry"), "VZ": ("Verizon", "Energy & Industry"),
-}
-TOP_TECH = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ORCL", "AMD", "NFLX", "PLTR"]   # slide 3 of movers
-SECTORS = ["All", "Tech", "Finance", "Healthcare", "Consumer", "Energy & Industry"]
-
-# ---- Categories: label, accent, playlist, how to tell it, tags ----------------------------------------
-CATEGORIES = {
-    "movers": ("BIGGEST MOVERS TODAY", "0x3B82F6", "Biggest Movers",
-               "Today's 4 biggest gainers among big US stocks (or the 4 biggest losers if the market fell), "
-               "with the reason from the news.",
-               ["stock market today", "biggest movers"]),
-    "news": ("MARKET NEWS", "0x3B82F6", "Market News",
-             "The 3 market stories that mattered most today, and which stocks they moved.",
-             ["stock market news", "market news today"]),
-    "pe": ("LOWEST P/E STOCKS", "0x3B82F6", "Lowest P/E",
-           "The cheapest big stocks by P/E ratio, and why cheap is not always a bargain.",
-           ["value stocks", "low PE stocks"]),
-    "month": ("TOP PICKS OF ANALYSTS THIS MONTH", "0x3B82F6", "Analysts' Top Picks",
-              "The stocks Wall Street analysts rate highest this month, and the event to watch for each.",
-              ["stocks to watch", "analyst ratings"]),
-    "y2030": ("2030 POTENTIAL", "0x3B82F6", "2030 Potential",
-              "The fastest-growing big companies of the last 5 years, and what that pace would mean by 2030 "
-              "if it continued.", ["growth stocks", "stocks for 2030"]),
-}
-NOW = dt.datetime.now(dt.timezone.utc)
-US_DATE = (NOW - dt.timedelta(hours=5)).date()           # trading day in New York
-EVENING = NOW.weekday() < 5 and (NOW.hour >= 21 or NOW.hour < 2) or (NOW.weekday() == 5 and NOW.hour < 2)
-
-
-def pick_category():
-    """Weekday evenings: movers, then news (once per trading day). Otherwise: P/E, analysts, 2030 in turn."""
-    if env("CATEGORY"):
-        return env("CATEGORY")
-    if EVENING:
-        for c in ("movers", "news"):
-            if f"{c} {US_DATE}" not in used:
-                return c
-    return ["pe", "month", "y2030"][sum(1 for u in used if not u.startswith(("movers", "news"))) % 3]
-
-
-CATEGORY = pick_category()
-LABEL, ACCENT, PLAYLIST, STORY, CAT_TAGS = CATEGORIES[CATEGORY]
-KIND = "single"                                          # used by the shared sound design
-
-# ---- Settings (override in the workflow env) ----------------------------------
-MUSIC = pathlib.Path("music.mp3")                       # fallback track, repo root
-MOODS = ("positive", "negative", "neutral")
-
-
-MOOD_WORDS = {   # file name -> mood, so all tracks can simply be dropped into music/
-    "negative": ("dark", "sad", "cinematic", "tense", "suspense", "slowed"),
-    "neutral": ("lofi", "chill", "calm", "ambient", "vlog", "focus", "study"),
-}
-
-
-def track_mood(path):
-    name = path.stem.lower()
-    for mood, words in MOOD_WORDS.items():
-        if any(w in name for w in words):
-            return mood
-    return "positive"                                    # upbeat, hip hop beat, motivational ...
-
-
-def mood_track(mood):
-    """Random track for the mood: music/<mood>/*.mp3 first, else any music/*.mp3 whose name fits the mood."""
-    tracks = sorted((pathlib.Path("music") / mood).glob("*.mp3")) or \
-        [t for t in sorted(pathlib.Path("music").glob("*.mp3")) if track_mood(t) == mood]
-    return random.choice(tracks) if tracks else None
-
-
-MUSIC_START = float(env("MUSIC_START", "0"))
-CHANNEL = env("CHANNEL", "MARKET PULSE")                 # shown in every frame
-FILE_NO = len(used) + 1
-HEADLINE, COVER_END = "", 0.0                           # set per video
-NARRATION = env("NARRATION", "1") == "1"
+DRY = env("DRY_RUN", "0") == "1"
+LEARN = env("LEARN", "1") == "1"
+FPS = int(env("FPS", "30"))
+CHANNEL = env("CHANNEL", "BULL & BEAR DAILY")
 VOICE = env("VOICE", "en-US-AndrewNeural")
-MUSIC_VOL = float(env("MUSIC_VOL", "0.08" if NARRATION else "0.18"))
-SFX = env("SFX", "1") == "1"
+RATE = env("RATE", "+10%")
+MUSIC_VOL = float(env("MUSIC_VOL", "0.10"))
+SFX_ON = env("SFX", "1") == "1"
 SFX_VOL = float(env("SFX_VOL", "1.0"))
-FUNNY = 0.0
-LANGS = [l.strip() for l in env("LANGS", "es,pt,de,fr,it,pl,uk,tr").split(",") if l.strip()]
-MIN_SEC, MAX_SEC = 15.0, 40.0
-FINNHUB = "https://finnhub.io/api/v1"
-DISCLAIMER = ("Not financial advice. This is an automated summary of public market data for education and "
-              "entertainment. Do your own research before investing. Data: Finnhub.")
+LANGS = [x.strip() for x in env("LANGS", "es,pt,de,fr,it,pl,uk,tr").split(",") if x.strip()]
+NOW = dt.datetime.now(dt.timezone.utc)
+TODAY = NOW.strftime("%Y-%m-%d")
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0 Safari/537.36"}
+US_POP = 340e6
+SR = 44100
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+LONG_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+               "October", "November", "December"]
 
-# ---- Layout 1080x1920: black bar | slide | black bar ---------------------------
-TOP_BAR, MID_H = 380, 810
-BOT_Y = TOP_BAR + MID_H
-# ---- Colour themes (THEME in the workflow env): dark (default), light, paper ----------------------------
-def bgr(rgb, a="00"):
-    return f"&H{a}{rgb[2]:02X}{rgb[1]:02X}{rgb[0]:02X}&"
-
-
-THEMES = {   # bg, text, muted, hairline, accent, accent-light, up text, down text, up bar, down bar, blue bar
-    "dark": dict(bg=(0, 0, 0), ink=(255, 255, 255), muted=(115, 115, 115), line=(38, 38, 38),
-                 acc=(59, 130, 246), acc2=(147, 197, 253), up=(57, 232, 20), down=(239, 68, 68),
-                 bar_up=(120, 205, 120), bar_down=(222, 112, 112), bar_blue=(112, 150, 222), sub=(200, 200, 200)),
-    "light": dict(bg=(255, 255, 255), ink=(17, 24, 39), muted=(107, 114, 128), line=(229, 231, 235),
-                  acc=(37, 99, 235), acc2=(96, 165, 250), up=(22, 163, 74), down=(220, 38, 38),
-                  bar_up=(134, 214, 140), bar_down=(240, 140, 140), bar_blue=(147, 180, 240), sub=(75, 85, 99)),
-    "paper": dict(bg=(246, 243, 236), ink=(15, 32, 64), muted=(120, 113, 105), line=(224, 218, 206),
-                  acc=(30, 64, 175), acc2=(59, 130, 246), up=(21, 128, 61), down=(185, 28, 28),
-                  bar_up=(163, 207, 160), bar_down=(230, 160, 150), bar_blue=(160, 180, 220), sub=(90, 84, 78)),
+# ---- Companies: ticker -> (name, tier 1-3 = how famous, IPO year or None, sector, extra comment aliases) ----
+COMPANIES = {
+    "AAPL": ("Apple", 1, None, "tech", []), "MSFT": ("Microsoft", 1, None, "tech", []),
+    "NVDA": ("Nvidia", 1, 1999, "chips", []), "AMZN": ("Amazon", 1, 1997, "retail", []),
+    "GOOGL": ("Google", 1, 2004, "tech", ["alphabet"]), "META": ("Meta", 1, 2012, "tech", ["facebook"]),
+    "TSLA": ("Tesla", 1, 2010, "auto", []), "NFLX": ("Netflix", 1, 2002, "media", []),
+    "COST": ("Costco", 1, None, "retail", []), "MCD": ("McDonald's", 1, None, "food", ["mcdonalds"]),
+    "KO": ("Coca-Cola", 1, None, "food", ["coke", "coca cola"]), "PEP": ("PepsiCo", 2, None, "food", ["pepsi"]),
+    "NKE": ("Nike", 1, None, "retail", []), "DIS": ("Disney", 1, None, "media", []),
+    "SBUX": ("Starbucks", 1, 1992, "food", []), "WMT": ("Walmart", 1, None, "retail", []),
+    "HD": ("Home Depot", 2, None, "retail", []), "LOW": ("Lowe's", 3, None, "retail", ["lowes"]),
+    "V": ("Visa", 2, 2008, "finance", []), "MA": ("Mastercard", 2, 2006, "finance", []),
+    "JPM": ("JPMorgan", 2, None, "finance", ["jp morgan"]), "BAC": ("Bank of America", 3, None, "finance", []),
+    "BRK-B": ("Berkshire Hathaway", 2, None, "finance", ["berkshire"]),
+    "AMD": ("AMD", 1, None, "chips", []), "INTC": ("Intel", 1, None, "chips", []),
+    "ORCL": ("Oracle", 2, None, "tech", []), "ADBE": ("Adobe", 2, None, "tech", []),
+    "CRM": ("Salesforce", 2, 2004, "tech", []), "PYPL": ("PayPal", 2, None, "finance", []),
+    "UBER": ("Uber", 1, 2019, "tech", []), "LYFT": ("Lyft", 3, 2019, "tech", []),
+    "ABNB": ("Airbnb", 2, 2020, "tech", []), "SHOP": ("Shopify", 2, 2015, "tech", []),
+    "SPOT": ("Spotify", 2, 2018, "media", []), "PLTR": ("Palantir", 1, 2020, "tech", []),
+    "COIN": ("Coinbase", 2, 2021, "finance", []), "HOOD": ("Robinhood", 2, 2021, "finance", []),
+    "RBLX": ("Roblox", 2, 2021, "media", []), "SNAP": ("Snap", 2, 2017, "tech", ["snapchat"]),
+    "PTON": ("Peloton", 2, 2019, "retail", []), "ZM": ("Zoom", 2, 2019, "tech", []),
+    "GME": ("GameStop", 1, None, "retail", ["gamestop"]), "AMC": ("AMC", 2, None, "media", []),
+    "BA": ("Boeing", 2, None, "industrial", []), "F": ("Ford", 2, None, "auto", []),
+    "GM": ("General Motors", 3, 2010, "auto", []), "LULU": ("Lululemon", 2, 2007, "retail", []),
+    "CMG": ("Chipotle", 2, 2006, "food", []), "TGT": ("Target", 3, None, "retail", []),
+    "PG": ("Procter & Gamble", 3, None, "food", []), "JNJ": ("Johnson & Johnson", 3, None, "health", []),
+    "PFE": ("Pfizer", 2, None, "health", []), "MRNA": ("Moderna", 2, 2018, "health", []),
+    "LLY": ("Eli Lilly", 2, None, "health", ["lilly"]), "XOM": ("ExxonMobil", 3, None, "energy", ["exxon"]),
+    "CVX": ("Chevron", 3, None, "energy", []), "CAT": ("Caterpillar", 3, None, "industrial", []),
+    "IBM": ("IBM", 2, None, "tech", []), "CSCO": ("Cisco", 3, None, "tech", []),
+    "QCOM": ("Qualcomm", 3, None, "chips", []), "AVGO": ("Broadcom", 2, 2009, "chips", []),
+    "MU": ("Micron", 3, None, "chips", []), "TSM": ("TSMC", 2, None, "chips", []),
+    "SONY": ("Sony", 2, None, "media", []), "BABA": ("Alibaba", 2, 2014, "retail", []),
+    "RIVN": ("Rivian", 2, 2021, "auto", []), "LCID": ("Lucid", 3, None, "auto", []),
+    "SMCI": ("Super Micro", 3, None, "chips", ["supermicro"]), "DUOL": ("Duolingo", 2, 2021, "tech", []),
+    "SPY": ("the S&P 500", 2, None, "index", ["s&p 500", "s&p", "sp500"]),
+    "QQQ": ("the Nasdaq 100", 3, None, "index", ["nasdaq"]),
 }
-THEME = THEMES.get(env("THEME", "paper"), THEMES["paper"])   # paper = the channel's main look
-WHITE, RED, YELLOW = bgr(THEME["ink"]), bgr(THEME["acc"]), bgr(THEME["acc2"])   # ASS: text, highlight, 2nd
-GREEN_ASS, RED_ASS = bgr(THEME["up"]), bgr(THEME["down"])                      # growth up / down
-SIGNED = re.compile(r"(?<![\w.])([+\-−])\$?\d[\d,]*\.?\d*%?(?:/yr)?", re.I)
-ACCENT = "0x%02X%02X%02X" % THEME["acc"]                 # one accent per theme
-ACC_ASS = f"&H00{ACCENT[6:8]}{ACCENT[4:6]}{ACCENT[2:4]}&"
-ACC_RGB = tuple(int(ACCENT[k:k + 2], 16) for k in (2, 4, 6))
-FONT = pathlib.Path("font.ttf")
-FONTS_DIR = str(FONT.resolve().parent) if FONT.exists() else "/usr/share/fonts/truetype/dejavu"
-UP, DOWN, INK, BG, MUTED = THEME["up"], THEME["down"], THEME["ink"], THEME["bg"], THEME["muted"]
-LINE = THEME["line"]                                    # hairlines
-COVER_UP, COVER_DOWN, COVER_BLUE = (57, 232, 20), (239, 68, 68), (59, 130, 246)   # cover looks the same on every theme
+ETFS = {"SPY", "QQQ"}
+PEAK_POOL = ["PTON", "ZM", "SNAP", "PYPL", "INTC", "NKE", "BA", "MRNA", "BABA", "RIVN", "LCID", "AMC", "DIS",
+             "LULU", "SBUX", "PFE", "TGT", "COIN", "RBLX", "ABNB", "DUOL", "SMCI", "GME", "F", "MU", "ADBE"]
+BATTLES = [("AAPL", "MSFT"), ("KO", "PEP"), ("NVDA", "AMD"), ("AMD", "INTC"), ("TSLA", "F"), ("NFLX", "DIS"),
+           ("V", "MA"), ("HD", "LOW"), ("COST", "WMT"), ("UBER", "LYFT"), ("META", "SNAP"), ("GOOGL", "MSFT"),
+           ("AMZN", "WMT"), ("SBUX", "MCD"), ("XOM", "CVX"), ("JPM", "BAC"), ("NKE", "LULU"), ("MCD", "CMG"),
+           ("AAPL", "GOOGL"), ("ORCL", "CRM"), ("TSM", "INTC"), ("LLY", "PFE"), ("SPY", "TSLA"), ("SPY", "AAPL"),
+           ("NVDA", "TSLA"), ("AMZN", "GOOGL"), ("META", "NFLX"), ("COST", "TGT"), ("PLTR", "NVDA"),
+           ("SPY", "QQQ"), ("AVGO", "QCOM"), ("MU", "INTC"), ("COIN", "HOOD"), ("DIS", "SONY")]
+SERIES_INFO = {   # label on screen, playlist, base weight
+    "time_machine": ("TIME MACHINE", "Time Machine: $1,000 Then vs Now", 0.55),
+    "peak": ("BOUGHT THE TOP", "Bought the Top", 0.15),
+    "battle": ("STOCK BATTLE", "Stock Battles: $1,000 Each", 0.30),
+    "shock": ("MARKET SHOCK", "Market Shock", 0.0),
+}
+HOOKS = ["you", "question", "imagine", "number"]
+
+# ---- Look ---------------------------------------------------------------------------------------------
+WD, HT = 1080, 1920
+BG1, BG2, GRID = (11, 22, 46), (3, 6, 15), (24, 42, 76)
+WHITE, MUTED, DIM = (255, 255, 255), (150, 163, 186), (92, 106, 132)
+GREEN, RED, GOLD = (57, 232, 20), (255, 59, 59), (255, 201, 40)
+BLUE, CYAN, ORANGE, SPY_C = (59, 130, 246), (34, 211, 238), (251, 146, 60), (128, 140, 165)
+CARD = (15, 28, 56)
+BRAND_Y, HEAD_Y, ROW_Y, COUNTER_Y, CHIP_Y = 172, 220, 478, 507, 742
+CX0, CY0, CX1, CY1 = 70, 850, 900, 1262        # chart box (right edge stays left of the Shorts buttons)
+CAP_Y = 1380                                   # captions centre (above the title / channel-name overlay)
+CAP_X, CAP_W = 520, 800                        # captions centre x and max width (clear of the buttons)
 
 
-# ---- Shared helpers (same as the other bots) -------------------------------------
-def x264(crf):
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-pix_fmt", "yuv420p"]
+# =========================================================================================================
+# small helpers
+# =========================================================================================================
+def clamp(x, a=0.0, b=1.0):
+    return max(a, min(b, x))
 
 
-def ff(*args):
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args], check=True, cwd=W)
+def ease_out(x):
+    x = clamp(x)
+    return 1 - (1 - x) ** 3
+
+
+def load_json(path, default):
+    try:
+        return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def save_json(path, obj):
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def days_since(date_str):
+    try:
+        return (NOW.date() - dt.date.fromisoformat(date_str[:10])).days
+    except Exception:
+        return 9999
+
+
+def safe(sym):
+    return re.sub(r"[^A-Za-z0-9_-]", "_", sym)
+
+
+def month_label(ym, long=False):
+    y, m = ym.split("-")[:2]
+    return f"{(LONG_MONTHS if long else MONTHS)[int(m) - 1]} {y}"
+
+
+def add_months(ym, k):
+    y, m = int(ym[:4]), int(ym[5:7]) - 1 + k
+    return f"{y + m // 12:04d}-{m % 12 + 1:02d}"
+
+
+def money(v):
+    return ("-" if v < 0 else "") + f"${abs(v):,.0f}"
+
+
+def money2(v):
+    return f"${v:,.2f}"
+
+
+def short_money(v):
+    a, s = abs(v), "-" if v < 0 else ""
+    for div, suf in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if a >= div:
+            x = a / div
+            txt = f"{x:.0f}" if x >= 100 else f"{x:.1f}" if x >= 10 else f"{x:.2f}"
+            if "." in txt:
+                txt = txt.rstrip("0").rstrip(".")
+            return f"{s}${txt}{suf}"
+    return f"{s}${a:,.0f}"
+
+
+def say_money(v):
+    """Rounded money for the voice: about $287,000 / $1.24 million / $210 billion."""
+    a = abs(v)
+    if a >= 1e12:
+        return f"${f'{a / 1e12:.1f}'.rstrip('0').rstrip('.')} trillion"
+    if a >= 1e9:
+        x = f"{a / 1e9:.0f}" if a >= 1e10 else f"{a / 1e9:.1f}".rstrip("0").rstrip(".")
+        return f"${x} billion"
+    if a >= 1e6:
+        return f"${f'{a / 1e6:.2f}'.rstrip('0').rstrip('.')} million"
+    if a >= 1e5:
+        return f"${round(a, -3):,.0f}"
+    if a >= 1e3:
+        return f"${round(a, -2):,.0f}"
+    return f"${round(a):,.0f}"
+
+
+def times_words(m):
+    return f"{m:.0f} times" if m >= 10 else f"{m:.1f} times".replace(".0 ", " ")
+
+
+def mult_chip(m):
+    if m < 1:
+        return f"–{(1 - m) * 100:.0f}%"
+    return f"{m:,.0f}X" if m >= 10 else f"{m:.1f}X"
+
+
+NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def numbers_in(text):
+    out = []
+    for x in NUM.findall(str(text)):
+        try:
+            out.append(float(x.replace(",", "")))
+        except ValueError:
+            pass
+    return out
+
+
+def collect_numbers(obj, out=None):
+    out = [] if out is None else out
+    if isinstance(obj, dict):
+        for v in obj.values():
+            collect_numbers(v, out)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            collect_numbers(v, out)
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        out.append(float(obj))
+    elif isinstance(obj, str):
+        out += numbers_in(obj)
+    return out
+
+
+INDEX_NAMES = re.compile(r"S&P\s*500|Nasdaq[- ]?100", re.I)
+
+
+def numbers_ok(text, allowed):
+    """Every number must be (close to) one of the facts; years and small counts are always fine."""
+    for x in numbers_in(INDEX_NAMES.sub("", str(text))):
+        if x <= 12 or (1980 <= x <= 2040 and x == int(x)):
+            continue
+        if any(abs(x - a) <= 0.016 * max(abs(a), 1.0) for a in allowed):
+            continue
+        return False, x
+    return True, None
+
+
+# =========================================================================================================
+# state
+# =========================================================================================================
+def load_state():
+    s = load_json(STATE_FILE, {})
+    if isinstance(s, list):                     # v1 kept a plain list of keys
+        s = {"legacy": s}
+    s.setdefault("version", 2)
+    s.setdefault("videos", [])
+    s.setdefault("requests_done", {})
+    return s
+
+
+STATE = load_state()
+
+
+def save_state():
+    save_json(STATE_FILE, STATE)
+
+
+def recent(field, n):
+    return [v.get(field) for v in STATE["videos"][-n:]]
+
+
+# =========================================================================================================
+# network: Finnhub, prices, logos
+# =========================================================================================================
+def http_get(url, params=None, headers=None, timeout=40, tries=3):
+    for k in range(tries):
+        try:
+            r = requests.get(url, params=params, headers=UA if headers is None else headers, timeout=timeout)
+            if r.status_code == 429:
+                time.sleep(6 * (k + 1))
+                continue
+            return r
+        except requests.RequestException as e:
+            print("net:", url.split("?")[0], type(e).__name__)
+            time.sleep(2 + 2 * k)
+    return None
+
+
+def fh_symbol(sym):
+    return sym.replace("-", ".")
+
+
+def fh(path, **params):
+    key = env("FINNHUB_API_KEY")
+    if not key:
+        return None
+    for _ in range(3):
+        r = http_get(f"https://finnhub.io/api/v1/{path}", {**params, "token": key}, headers={}, tries=1)
+        time.sleep(1.05)                              # free tier: 60 calls / minute
+        if r is None:
+            continue
+        if r.status_code == 429:
+            time.sleep(15)
+            continue
+        if r.status_code in (401, 403):
+            print("finnhub", path, r.status_code, "(not on this plan)")
+            return None
+        try:
+            return r.json()
+        except ValueError:
+            return None
+    return None
+
+
+QUOTES = {}
+
+
+def quote(sym):
+    if sym not in QUOTES:
+        q = fh("quote", symbol=fh_symbol(sym)) or {}
+        QUOTES[sym] = q if q.get("c") and q.get("pc") else None
+    return QUOTES[sym]
+
+
+def profile(sym):
+    cache = load_json(PROFILE_FILE, {})
+    p = cache.get(sym)
+    if p and days_since(p.get("fetched", "")) < 7:
+        return p
+    if sym in ETFS:
+        return p or {}
+    d = fh("stock/profile2", symbol=fh_symbol(sym)) or {}
+    if d.get("name"):
+        p = {"name": d["name"], "shares": d.get("shareOutstanding"), "logo": d.get("logo"),
+             "mcap": d.get("marketCapitalization"), "fetched": TODAY}
+        cache[sym] = p
+        save_json(PROFILE_FILE, cache)
+    return p or {}
+
+
+def logo_image(sym):
+    """Company logo as provided by the data feed (Finnhub profile), cached in data/logos."""
+    path = LOGO_DIR / f"{safe(sym)}.png"
+    if path.exists():
+        try:
+            return Image.open(path).convert("RGBA")
+        except Exception:
+            pass
+    url = profile(sym).get("logo")
+    if not url:
+        return None
+    r = http_get(url, tries=2)
+    if r is None or r.status_code != 200:
+        return None
+    try:
+        from io import BytesIO
+        im = Image.open(BytesIO(r.content)).convert("RGBA")
+        im.thumbnail((256, 256), Image.LANCZOS)
+        LOGO_DIR.mkdir(parents=True, exist_ok=True)
+        im.save(path)
+        return im
+    except Exception as e:
+        print("logo skipped:", sym, type(e).__name__)
+        return None
+
+
+def company_news(sym, days=2, k=4):
+    d0 = (NOW - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    news = fh("company-news", symbol=fh_symbol(sym), **{"from": d0, "to": TODAY}) or []
+    return [{"headline": n.get("headline", ""), "summary": str(n.get("summary", ""))[:280]}
+            for n in news[:k] if n.get("headline")]
+
+
+# ---- monthly price history (adjusted when the source supports it), cached in data/prices ----------------
+def from_tiingo(sym):
+    key = env("TIINGO_API_KEY")
+    if not key:
+        return None, None
+    r = http_get(f"https://api.tiingo.com/tiingo/daily/{sym.lower()}/prices",
+                 {"startDate": "1985-01-01", "resampleFreq": "monthly", "token": key},
+                 headers={"Content-Type": "application/json"})
+    if r is None or r.status_code != 200:
+        return None, None
+    rows = r.json()
+    return [(row["date"][:7], float(row["adjClose"])) for row in rows if row.get("adjClose")], True
+
+
+def from_alphavantage(sym):
+    key = env("ALPHAVANTAGE_API_KEY")
+    if not key:
+        return None, None
+    r = http_get("https://www.alphavantage.co/query",
+                 {"function": "TIME_SERIES_MONTHLY_ADJUSTED", "symbol": sym, "apikey": key})
+    if r is None or r.status_code != 200:
+        return None, None
+    js = r.json().get("Monthly Adjusted Time Series") or {}
+    return [(d[:7], float(v["5. adjusted close"])) for d, v in js.items()], True
+
+
+def from_yahoo(sym):
+    for host in ("query2", "query1"):
+        r = http_get(f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
+                     {"range": "max", "interval": "1mo", "includeAdjustedClose": "true", "events": "div,split"})
+        if r is None or r.status_code != 200:
+            continue
+        res = r.json()["chart"]["result"][0]
+        adj = res["indicators"]["adjclose"][0]["adjclose"]
+        pts = [(dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m"), float(a))
+               for t, a in zip(res["timestamp"], adj) if a]
+        return pts, True
+    return None, None
+
+
+def from_stooq(sym):
+    r = http_get("https://stooq.com/q/d/l/", {"s": f"{sym.lower().replace('-', '.')}.us", "i": "m"})
+    if r is None or r.status_code != 200 or not r.text.startswith("Date"):
+        return None, None
+    pts = []
+    for line in r.text.strip().splitlines()[1:]:
+        p = line.split(",")
+        if len(p) >= 5 and p[4] not in ("", "null"):
+            pts.append((p[0][:7], float(p[4])))
+    return pts, False                                 # split-adjusted only
+
+
+PROVIDERS = [("Tiingo", from_tiingo), ("Alpha Vantage", from_alphavantage), ("Yahoo Finance", from_yahoo),
+             ("Stooq", from_stooq)]
+
+
+def price_history(sym, force=False):
+    path = PRICE_DIR / f"{safe(sym)}.json"
+    cached = load_json(path, None)
+    if cached and days_since(cached.get("updated", "")) < 7 and not force:
+        return cached
+    for name, fn in PROVIDERS:
+        try:
+            pts, div = fn(sym)
+        except Exception as e:
+            print("prices:", name, sym, type(e).__name__, str(e)[:120])
+            continue
+        if pts and len(pts) >= 24:
+            data = {"src": name, "div": bool(div), "updated": TODAY, "points": sorted(dict(pts).items())}
+            save_json(path, data)
+            print(f"prices: {sym} from {name} ({len(data['points'])} months)")
+            return data
+    if cached:
+        print("prices: using older cache for", sym)
+    return cached
+
+
+def load_series(sym):
+    """[(YYYY-MM, price)] oldest first; the last point is today's price when Finnhub answers."""
+    data = price_history(sym)
+    if not data or len(data.get("points", [])) < 24:
+        return None
+    pts = sorted({p[0][:7]: float(p[1]) for p in data["points"] if p[1]}.items())
+    q = quote(sym)
+    if q and not 0.6 <= q["c"] / pts[-1][1] <= 1.6:      # stale cache across a split? refetch once
+        print(f"prices: {sym} live {q['c']} vs history {pts[-1][1]:.2f}, refreshing")
+        fresh = price_history(sym, force=True)
+        if fresh and len(fresh.get("points", [])) >= 24:
+            data = fresh
+            pts = sorted({p[0][:7]: float(p[1]) for p in data["points"] if p[1]}.items())
+        if not 0.6 <= q["c"] / pts[-1][1] <= 1.6:
+            print("prices: live price ignored for", sym)
+            q = None
+    ym = NOW.strftime("%Y-%m")
+    live = False
+    if q:
+        if pts[-1][0] == ym:
+            pts[-1] = (ym, float(q["c"]))
+        elif pts[-1][0] < ym:
+            pts.append((ym, float(q["c"])))
+        live = True
+    return {"pts": pts, "div": data.get("div", False), "src": data.get("src", "?"), "live": live}
+
+
+# =========================================================================================================
+# stories
+# =========================================================================================================
+def name_of(sym):
+    return COMPANIES.get(sym, (sym,))[0]
+
+
+def screen_name(sym):
+    n = name_of(sym)
+    return n.replace("the ", "").upper() if sym in ETFS else n.upper()
+
+
+def aligned(sym_series, months):
+    """Values of another series on the given months (forward-filled); None if it starts too late."""
+    if not sym_series:
+        return None
+    m = dict(sym_series["pts"])
+    out, last = [], None
+    for ym in months:
+        last = m.get(ym, last)
+        if last is None:
+            return None
+        out.append(last)
+    return out
+
+
+def pick_events(cands, n, max_k=3, gap=0.13, lo=0.08, hi=0.86):
+    chosen = []
+    for e in sorted(cands, key=lambda e: -e["score"]):
+        f = e["i"] / max(1, n - 1)
+        if not lo <= f <= hi:
+            continue
+        if all(abs(f - c["i"] / max(1, n - 1)) >= gap for c in chosen):
+            chosen.append(e)
+        if len(chosen) >= max_k:
+            break
+    return sorted(chosen, key=lambda e: e["i"])
+
+
+def growth_events(vals, months):
+    n = len(vals)
+    cands = []
+    scores = {2: 1.0, 5: 1.5, 10: 2.4, 20: 1.8, 50: 2.0, 100: 2.7, 200: 2.0, 500: 2.3, 1000: 2.9}
+    for k, sc in scores.items():
+        i = next((j for j, v in enumerate(vals) if v >= 1000 * k), None)
+        if i is not None:
+            cands.append({"i": i, "kind": "milestone", "k": k, "score": sc, "label": f"{k}X", "color": GOLD})
+    peak, best = 0, (0.0, 0, 0)
+    for j, v in enumerate(vals):
+        if v > vals[peak]:
+            peak = j
+        dd = 1 - v / vals[peak]
+        if dd > best[0]:
+            best = (dd, peak, j)
+    if best[0] >= 0.25:
+        dd = round(best[0] * 100)
+        cands.append({"i": best[2], "kind": "drawdown", "drop": dd, "peak_i": best[1], "score": 2.2 + best[0],
+                      "label": f"–{dd}%", "color": RED})
+    if vals[-1] < 1000:
+        ih = next((j for j, v in enumerate(vals) if v <= 500), None)
+        if ih is not None:
+            cands.append({"i": ih, "kind": "half", "score": 2.0, "label": "–50%", "color": RED})
+        im = int(np.argmin(vals))
+        if vals[im] < vals[-1] * 0.85:
+            cands.append({"i": im, "kind": "bottom", "score": 1.9, "color": RED,
+                          "label": f"–{round((1 - vals[im] / 1000) * 100)}%"})
+    ev = pick_events(cands, n)
+    for e in ev:
+        e["value"] = vals[e["i"]]
+        e["date"] = months[e["i"]]
+    return ev
+
+
+def base_facts(sym, s, months, vals, spy):
+    final = vals[-1]
+    m = final / 1000
+    years = (len(months) - 1) / 12
+    facts = {
+        "company": name_of(sym), "ticker": sym, "invested": "$1,000",
+        "start": month_label(months[0], True), "start_year": int(months[0][:4]),
+        "years": round(years, 1),
+        "final_value": money(final), "final_value_say": say_money(final),
+        "multiple": round(m, 1) if m < 10 else round(m), "multiple_say": times_words(m) if m >= 1 else None,
+        "total_return_pct": f"{(m - 1) * 100:,.0f}%",
+        "as_of": "today" if s["live"] else month_label(months[-1], True),
+        "dividends": "reinvested" if s["div"] else "not included (price only)",
+    }
+    if years >= 1.5 and m > 0:
+        facts["per_year_pct"] = f"{(m ** (1 / years) - 1) * 100:.1f}%"
+    if spy:
+        sv = 1000 * spy[-1] / spy[0]
+        facts["sp500_same_period"] = money(sv)
+        facts["sp500_say"] = say_money(sv)
+    return facts
+
+
+def event_fact(e, months):
+    f = {"id": e["id"], "date": month_label(months[e["i"]], True), "year": int(months[e["i"]][:4]),
+         "type": e["kind"], "value": money(e["value"]), "value_say": say_money(e["value"])}
+    if e["kind"] == "milestone":
+        f["multiple"] = f"{e['k']} times the money"
+    elif e["kind"] == "drawdown":
+        f["drop_from_peak_pct"] = f"{e['drop']}%"
+        f["peak_date"] = month_label(months[e["peak_i"]], True)
+    elif e["kind"] == "half":
+        f["note"] = "half of the money was gone"
+    elif e["kind"] == "bottom":
+        f["note"] = "the lowest point"
+    elif e["kind"] == "lead":
+        f["leader"] = e["leader_name"]
+        f["leader_value"] = money(e["leader_value"])
+        f["other_value"] = money(e["other_value"])
+        if e.get("pull"):
+            f["note"] = f"{e['leader_name']} pulls clearly ahead (it led the whole way)"
+    return f
+
+
+def story_single(sym, series, mode=None, years=None, asked=False):
+    s = load_series(sym)
+    if not s or len(s["pts"]) < 30:
+        return None
+    months = [p[0] for p in s["pts"]]
+    prices = [p[1] for p in s["pts"]]
+    now_ym = months[-1]
+    if series == "peak":
+        i_from = next((i for i, m in enumerate(months) if m >= add_months(now_ym, -180)), 0)
+        i0 = max(range(i_from, len(prices)), key=lambda i: prices[i])
+        if prices[-1] / prices[i0] > 0.6 or len(prices) - i0 < 12:
+            return None
+        mode = "peak"
+    else:
+        ipo = COMPANIES.get(sym, (None, 3, None))[2]
+        options = {"ago": 0.7}
+        if "2020-03" in months and months.index("2020-03") < len(months) - 24:
+            options["crash"] = 0.15
+        if ipo and months[0][:4] == str(ipo) and len(months) <= 12 * 30:
+            options["ipo"] = 0.15
+        mode = mode if mode in options else random.choices(list(options), list(options.values()))[0]
+        if mode == "ago":
+            avail = [y for y in (10, 5, 15, 20) if months[0] <= add_months(now_ym, -12 * y)]
+            if not avail:
+                return None
+            if years not in avail:
+                years = random.choices(avail, [{10: 0.5, 5: 0.2, 15: 0.15, 20: 0.15}[y] for y in avail])[0]
+            start = add_months(now_ym, -12 * years)
+            i0 = next(i for i, m in enumerate(months) if m >= start)
+        elif mode == "crash":
+            i0 = months.index("2020-03")
+        else:
+            i0 = 0
+    months, prices = months[i0:], prices[i0:]
+    vals = [1000 * p / prices[0] for p in prices]
+    spy = None if sym in ETFS else aligned(load_series("SPY"), months)
+    events = growth_events(vals, months)
+    for k, e in enumerate(events, 1):
+        e["id"] = f"e{k}"
+    yrs = round((len(months) - 1) / 12)
+    facts = base_facts(sym, s, months, vals, spy)
+    facts["mode"] = {"ago": f"bought {yrs} years ago", "crash": "bought in March 2020, during the COVID crash",
+                     "ipo": "bought the month it went public", "peak": "bought at the all-time high (the very top)"}[mode]
+    facts["events"] = [event_fact(e, months) for e in events]
+    gain = vals[-1] >= 1000
+    line2 = {"ago": f"{yrs} YEARS AGO", "crash": "IN THE 2020 CRASH", "ipo": "AT ITS IPO",
+             "peak": "AT THE VERY TOP"}[mode]
+    return {
+        "series": series, "mode": mode, "tickers": [sym], "names": [name_of(sym)], "asked": asked,
+        "key": f"{series} {sym} {mode} {yrs}", "months": months, "lines": [vals], "ghost": spy,
+        "colors": [GREEN if gain else RED], "events": events, "facts": facts, "years": yrs,
+        "mood": "positive" if gain else "negative", "gain": gain, "src": s["src"], "div": s["div"],
+        "headline": [[("$1,000", GOLD), (" IN " + screen_name(sym), WHITE)],
+                     [(line2, RED if mode == "peak" else WHITE)]],
+    }
+
+
+def story_battle(a, b):
+    sa, sb = load_series(a), load_series(b)
+    if not sa or not sb:
+        return None
+    ma, mb = dict(sa["pts"]), dict(sb["pts"])
+    common = sorted(set(ma) & set(mb))
+    if len(common) < 40:
+        return None
+    start = max(common[0], add_months(common[-1], -120))
+    months = [m for m in common if m >= start]
+    va = [1000 * ma[m] / ma[months[0]] for m in months]
+    vb = [1000 * mb[m] / mb[months[0]] for m in months]
+    n = len(months)
+    changes, lead = [], None
+    for i in range(1, n):
+        r = va[i] / vb[i]
+        now = "a" if r > 1.03 else "b" if r < 1 / 1.03 else lead
+        if lead and now and now != lead:
+            changes.append({"i": i, "kind": "lead", "who": now})
+        lead = now or lead
+    events = []
+    ok_pos = lambda c: 0.08 <= c["i"] / (n - 1) <= 0.95
+    if changes:          # the lead change that decided it + the one just before (no other flip between them,
+        last = changes[-1]                           # so the voice never contradicts the chart)
+        prev = changes[-2] if len(changes) >= 2 else None
+        if ok_pos(last):
+            events.append(last)
+            if prev and ok_pos(prev) and (last["i"] - prev["i"]) / (n - 1) >= 0.06:
+                events.insert(0, prev)
+        elif prev and ok_pos(prev):
+            events.append(prev)
+    else:                                             # one side led all along: show where it pulled away
+        ratio = [max(x, y) / min(x, y) for x, y in zip(va, vb)]
+        i = next((j for j, r in enumerate(ratio) if r >= 1.5 and j / (n - 1) >= 0.08), None)
+        if i is not None and i / (n - 1) <= 0.92:
+            events.append({"i": i, "kind": "lead", "who": "a" if va[i] > vb[i] else "b", "pull": True})
+    for k, e in enumerate(events, 1):
+        who = e["who"]
+        e.update(id=f"e{k}", leader=a if who == "a" else b, leader_name=name_of(a if who == "a" else b),
+                 leader_value=(va if who == "a" else vb)[e["i"]], other_value=(vb if who == "a" else va)[e["i"]],
+                 value=(va if who == "a" else vb)[e["i"]], color=CYAN if who == "a" else ORANGE,
+                 label=("PULLS AHEAD" if e.get("pull") else "LEADS"))
+    yrs = round((n - 1) / 12)
+    win = a if va[-1] >= vb[-1] else b
+    wv, lv = max(va[-1], vb[-1]), min(va[-1], vb[-1])
+    facts = {
+        "company_a": name_of(a), "company_b": name_of(b), "invested_each": "$1,000",
+        "start": month_label(months[0], True), "start_year": int(months[0][:4]), "years": yrs,
+        "final_a": money(va[-1]), "final_a_say": say_money(va[-1]),
+        "final_b": money(vb[-1]), "final_b_say": say_money(vb[-1]),
+        "winner": name_of(win), "winner_multiple": f"{wv / 1000:.1f}" if wv < 10000 else f"{wv / 1000:.0f}",
+        "difference": money(wv - lv), "difference_say": say_money(wv - lv),
+        "as_of": "today" if (sa["live"] and sb["live"]) else month_label(months[-1], True),
+        "dividends": "reinvested" if (sa["div"] and sb["div"]) else "not included (price only)",
+        "events": [event_fact(e, months) for e in events],
+    }
+    return {
+        "series": "battle", "mode": "battle", "tickers": [a, b], "names": [name_of(a), name_of(b)], "asked": False,
+        "key": f"battle {a} {b}", "months": months, "lines": [va, vb], "ghost": None, "colors": [CYAN, ORANGE],
+        "events": events, "facts": facts, "years": yrs, "winner": win, "mood": "positive", "gain": True,
+        "src": sa["src"], "div": sa["div"] and sb["div"],
+        "headline": [[(screen_name(a), CYAN), (" VS ", WHITE), (screen_name(b), ORANGE)],
+                     [(f"$1,000 EACH · {yrs} YEARS", WHITE)]],
+    }
+
+
+def quote_day(ts):
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.fromtimestamp(ts, ZoneInfo("America/New_York")).date()
+    except Exception:
+        return (dt.datetime.fromtimestamp(ts, dt.timezone.utc) - dt.timedelta(hours=5)).date()
+
+
+def after_us_close():
+    """The first evening run after the New York close (16:15-21:00 New York time, Mon-Fri) gets MARKET SHOCK."""
+    try:
+        from zoneinfo import ZoneInfo
+        ny = NOW.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        ny = NOW - dt.timedelta(hours=5)
+    return ny.weekday() < 5 and (16, 15) <= (ny.hour, ny.minute) < (21, 0)
+
+
+def us_trading_day():
+    try:
+        from zoneinfo import ZoneInfo
+        ny = NOW.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        ny = NOW - dt.timedelta(hours=5)
+    return ny.date(), ny.weekday() < 5
+
+
+def story_shock():
+    if not env("FINNHUB_API_KEY"):
+        return None
+    day, weekday = us_trading_day()
+    if not weekday and not env("SERIES"):
+        return None
+    rows = []
+    for sym in COMPANIES:
+        if sym in ETFS:
+            continue
+        q, p = quote(sym), profile(sym)
+        if not q or not p.get("shares"):
+            continue
+        if q.get("t") and quote_day(q["t"]) != day:
+            continue
+        shares = float(p["shares"]) * 1e6
+        rows.append({"sym": sym, "c": q["c"], "pc": q["pc"], "dp": q.get("dp") or (q["c"] / q["pc"] - 1) * 100,
+                     "delta": shares * (q["c"] - q["pc"]), "mcap": shares * q["c"]})
+    if len(rows) < 20 or max(abs(r["dp"]) for r in rows) < 0.3:
+        print("shock: market closed or no data")
+        return None
+    top = max(rows, key=lambda r: abs(r["delta"]))
+    sym, delta = top["sym"], top["delta"]
+    lost = delta < 0
+    smaller = [r for r in rows if r["mcap"] < abs(delta) and r["sym"] != sym and COMPANIES[r["sym"]][1] <= 2]
+    comp = max(smaller, key=lambda r: r["mcap"]) if smaller else None
+    sector = COMPANIES[sym][3]
+    peers = [r["dp"] for r in rows if COMPANIES[r["sym"]][3] == sector and r["sym"] != sym]
+    sector_avg = sum(peers) / len(peers) if len(peers) >= 2 else None
+    news = company_news(sym)
+    facts = {
+        "company": name_of(sym), "ticker": sym, "date": day.strftime("%B %d, %Y"),
+        "market_cap_change": money(delta), "market_cap_change_say": say_money(delta),
+        "direction": "lost" if lost else "added", "price_change_pct": f"{abs(top['dp']):.1f}%",
+        "price_now": money2(top["c"]), "per_american": money(abs(delta) / US_POP),
+        "per_american_say": say_money(abs(delta) / US_POP), "us_population": "about 340 million people",
+    }
+    if comp:
+        facts["comparison"] = {"company": name_of(comp["sym"]), "its_whole_value": money(comp["mcap"]),
+                               "its_whole_value_say": say_money(comp["mcap"])}
+    if sector_avg is not None and abs(sector_avg) >= 1 and (sector_avg < 0) == lost:
+        word = {"chips": "chip", "food": "food and drink", "finance": "financial", "health": "healthcare",
+                "auto": "car"}.get(sector, sector)
+        facts["sector_move"] = (f"other {word} stocks {'fell' if lost else 'rose'} {abs(sector_avg):.1f}% "
+                                f"on average")
+    facts["news"] = news
+    word = "LOST" if lost else "ADDED"
+    return {
+        "series": "shock", "mode": "shock", "tickers": [sym], "names": [name_of(sym)], "asked": False,
+        "key": f"shock {day}", "facts": facts, "delta": delta, "pct": top["dp"], "price": top["c"], "comp": comp,
+        "mood": "negative" if lost else "positive", "gain": not lost, "src": "Finnhub", "div": False,
+        "headline": [[(screen_name(sym), WHITE)], [(f"JUST {word}", RED if lost else GREEN)]],
+        "events": [], "lines": [], "months": [], "ghost": None, "colors": [RED if lost else GREEN],
+    }
+
+
+# =========================================================================================================
+# learning + choosing
+# =========================================================================================================
+def update_views(yt):
+    due = [v for v in STATE["videos"] if v.get("id") and days_since(v.get("date", "")) >= 2
+           and days_since(v.get("date", "")) <= 45 and days_since(v.get("views_at", "2000-01-01")) >= 1]
+    for k in range(0, len(due), 50):
+        chunk = due[k:k + 50]
+        try:
+            res = yt.videos().list(part="statistics", id=",".join(v["id"] for v in chunk)).execute()
+        except Exception as e:
+            print("views unavailable:", str(e)[:160])
+            return
+        stats = {it["id"]: int(it["statistics"].get("viewCount", 0)) for it in res.get("items", [])}
+        for v in chunk:
+            if v["id"] in stats:
+                v["views"], v["views_at"] = stats[v["id"]], TODAY
+
+
+def weights_for(field, arms, base, where=None):
+    vids = [v for v in STATE["videos"] if v.get("views") is not None and (where is None or where(v))]
+    logs = [math.log1p(v["views"]) for v in vids]
+    mean_all = sum(logs) / len(logs) if logs else None
+    out = {}
+    for a in arms:
+        own = [math.log1p(v["views"]) for v in vids if v.get(field) == a]
+        if len(own) < 3 or mean_all is None:
+            out[a] = base[a] * 1.5                        # explore every arm at least 3 times
+        else:
+            out[a] = base[a] * clamp(math.exp(sum(own) / len(own) - mean_all), 0.5, 2.0)
+    return out
+
+
+def pick(weights):
+    arms = [a for a, w in weights.items() if w > 0]
+    if not arms:
+        return None
+    if random.random() < 0.1:
+        return random.choice(arms)
+    return random.choices(arms, [weights[a] for a in arms])[0]
+
+
+NAME_SKIP = {"target", "snap", "zoom", "lucid", "block"}
+COMMON_UPPER = {"A", "I", "IT", "ON", "ALL", "NOW", "ARM", "GE", "CAT", "LOW", "HD", "COST", "KO", "MA", "V", "F",
+                "T", "BA", "GM", "MU", "AMC", "SPY", "QQQ", "SNAP", "ZM"}
+
+
+def find_tickers(text):
+    found = set()
+    for m in re.findall(r"\$([A-Za-z]{1,5}(?:[.-][A-Za-z])?)\b", text):
+        sym = m.upper().replace(".", "-")
+        if sym in COMPANIES:
+            found.add(sym)
+    for tok in re.findall(r"\b[A-Z]{2,5}\b", text):
+        if tok in COMPANIES and tok not in COMMON_UPPER:
+            found.add(tok)
+    for a, b in re.findall(r"\b([A-Z]{1,5})[.-]([A-Z])\b", text):      # BRK.B / BRK-B
+        if f"{a}-{b}" in COMPANIES:
+            found.add(f"{a}-{b}")
+    low = text.lower()
+    for sym, info in COMPANIES.items():
+        names = [n for n in [info[0].lower().replace("the ", "")] + info[4] if n not in NAME_SKIP]
+        if any(re.search(rf"(?<![a-z]){re.escape(n)}(?![a-z])", low) for n in names if len(n) >= 3):
+            found.add(sym)
+    return found
+
+
+def comment_requests(yt):
+    counts = Counter()
+    try:
+        cid = STATE.get("channel_id")
+        if not cid:
+            items = yt.channels().list(part="id", mine=True).execute().get("items", [])
+            cid = items[0]["id"] if items else None
+            STATE["channel_id"] = cid
+        if not cid:
+            return counts
+        res = yt.commentThreads().list(part="snippet", allThreadsRelatedToChannelId=cid, maxResults=100,
+                                       order="time", textFormat="plainText").execute()
+    except Exception as e:
+        print("comments unavailable:", str(e)[:160])
+        return counts
+    for it in res.get("items", []):
+        sn = it["snippet"]["topLevelComment"]["snippet"]
+        if sn.get("authorChannelId", {}).get("value") == cid:
+            continue
+        for sym in find_tickers(sn.get("textOriginal") or sn.get("textDisplay", "")):
+            counts[sym] += 1
+    for sym in list(counts):
+        if days_since(STATE["requests_done"].get(sym, "2000-01-01")) < 30:
+            del counts[sym]
+    if counts:
+        print("comment requests:", dict(counts.most_common(5)))
+    return counts
+
+
+def pick_company(exclude=()):
+    recent_syms = {t for v in STATE["videos"][-14:] for t in v.get("tickers", [])}
+    pool = [s for s in COMPANIES if s not in recent_syms and s not in exclude]
+    return random.choices(pool, [{1: 3.0, 2: 1.6, 3: 0.8}[COMPANIES[s][1]] * (0.4 if s in ETFS else 1)
+                                 for s in pool])[0]
+
+
+def build_story(series, requests_, tick, used_keys):
+    if series == "shock":
+        return story_shock()
+    if series == "asked":
+        for sym, _ in requests_.most_common(3):
+            story = story_single(sym, "time_machine", asked=True)
+            if story:
+                return story
+    elif series == "battle":
+        pairs = [tuple(tick[:2])] if len(tick) >= 2 else \
+            [p for p in BATTLES if f"battle {p[0]} {p[1]}" not in used_keys]
+        random.shuffle(pairs)
+        for a, b in pairs[:4]:
+            story = story_battle(a, b)
+            if story:
+                return story
+    elif series == "peak":
+        pool = tick[:1] or [s for s in PEAK_POOL if s not in {t for v in STATE["videos"][-20:]
+                                                               for t in v.get("tickers", [])}]
+        random.shuffle(pool)
+        for sym in pool[:6]:
+            story = story_single(sym, "peak")
+            if story:
+                return story
+    elif series == "time_machine":
+        tries = tick[:1] or []
+        while len(tries) < 5:
+            tries.append(pick_company(exclude=tries))
+        for sym in tries:
+            story = story_single(sym, "time_machine", mode=env("MODE") or None,
+                                 years=int(env("YEARS")) if env("YEARS", "").isdigit() else None)
+            if story and story["key"] not in used_keys:
+                return story
+    return None
+
+
+def choose_story(requests_):
+    forced = env("SERIES", "").strip()
+    tick = [t.strip().upper() for t in env("TICKER", "").replace(" ", ",").split(",") if t.strip()]
+    shock_slot = after_us_close() and f"shock {us_trading_day()[0]}" not in recent("key", 12)
+    order = []
+    if forced:
+        order.append(forced)
+    elif shock_slot and env("FINNHUB_API_KEY"):
+        order.append("shock")
+    if not forced and requests_:
+        order.append("asked")
+    base = {k: v[2] for k, v in SERIES_INFO.items() if v[2] > 0}
+    while len(order) < 7:
+        order.append(pick(weights_for("series", list(base), base)))
+    used_keys = set(recent("key", 60))
+    for series in order:
+        try:
+            story = build_story(series, requests_, tick, used_keys)
+        except Exception as e:                      # one bad data source must not kill the run
+            print("story failed:", series, type(e).__name__, str(e)[:160])
+            story = None
+        if story:
+            print("series:", story["series"], "| key:", story["key"])
+            return story
+    raise SystemExit("No story could be built (no price data?)")
+
+
+# =========================================================================================================
+# script (Gemini words it, code checks it; templates if Gemini is unavailable)
+# =========================================================================================================
+def gemini(prompt, ok, rounds=3):
+    key = env("GEMINI_API_KEY")
+    if not key:
+        return None
+    models = [env("GEMINI_MODEL", "gemini-3.5-flash"), "gemini-flash-latest", "gemini-3.1-flash-lite"]
+    for r in range(rounds):
+        for model in models:
+            try:
+                resp = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    params={"key": key}, timeout=(15, 90),
+                    json={"contents": [{"parts": [{"text": prompt}]}],
+                          "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9}})
+                if not resp.ok:
+                    print(model, resp.status_code)
+                    continue
+                data = json.loads(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
+                if ok(data):
+                    return data
+                print(model, "rejected output")
+            except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
+                print(model, "error:", type(e).__name__)
+        if r + 1 < rounds:
+            time.sleep(20)
+    return None
+
+
+HOOK_STYLE = {
+    "you": "second person, as if it really happened to the viewer (e.g. 'You put $1,000 into Netflix in 2015.')",
+    "question": "one direct question (e.g. 'What happened to $1,000 in Netflix?')",
+    "imagine": "an 'imagine' scenario (e.g. 'Imagine you bought $1,000 of Netflix in 2015 and forgot.')",
+    "number": "a short punchy fragment that starts with the money (e.g. '$1,000. Netflix. 2015.')",
+    "asked": "say that viewers asked for this company in the comments (e.g. 'You asked for AMD. $1,000, ten "
+             "years ago.')",
+}
+
+
+def beats_for(story):
+    """Ordered beats: hook, one per chart event, reveal, kicker (shock has its own set)."""
+    if story["series"] == "shock":
+        b = ["hook"]
+        if story["facts"].get("comparison"):
+            b.append("compare")
+        b += ["person"]
+        if story["facts"]["news"] or story["facts"].get("sector_move"):
+            b.append("reason")
+        return b + ["close"]
+    return ["hook"] + [e["id"] for e in story["events"]] + ["reveal", "kicker"]
+
+
+def beat_rules(story, beats):
+    f = story["facts"]
+    s = story["series"]
+    out = []
+    for b in beats:
+        if b == "hook":
+            out.append("hook: max 9 words, spoken in the first 2 seconds. Must NOT reveal how it ended."
+                       if s != "shock" else
+                       f"hook: max 9 words: {f['company']} just {f['direction']} {f['market_cap_change_say']} "
+                       "of market value in one day.")
+        elif b.startswith("e"):
+            e = next(x for x in f["events"] if x["id"] == b)
+            out.append(f"{b}: max 12 words about {e['date']}: {json.dumps(e)}")
+        elif b == "reveal":
+            out.append("reveal: max 12 words: what it is worth " + (
+                f"today: {f['final_value_say']}" if s != "battle" else
+                f"today: {f['company_a']} {f['final_a_say']} vs {f['company_b']} {f['final_b_say']}"))
+        elif b == "kicker":
+            if s == "battle":
+                out.append(f"kicker: max 8 words: {f['winner']} wins (by about {f['difference_say']}).")
+            elif f.get("sp500_say"):
+                out.append(f"kicker: max 9 words: the S&P 500 over the same time turned $1,000 into "
+                           f"{f['sp500_say']} (compare, no advice).")
+            else:
+                out.append("kicker: max 8 words: " + (f"that is {f['multiple_say']} the money."
+                                                    if story["gain"] else f"that is {f['total_return_pct']}."))
+        elif b == "compare":
+            c = f["comparison"]
+            out.append(f"compare: max 12 words: that is more than all of {c['company']} is worth "
+                       f"({c['its_whole_value_say']}).")
+        elif b == "person":
+            out.append(f"person: max 10 words: about {f['per_american_say']} for every American.")
+        elif b == "reason":
+            out.append("reason: max 14 words: the likely reason, ONLY from the news or sector_move facts, in your "
+                       "own words (never copy a headline). If unclear, say what the facts show.")
+        elif b == "close":
+            out.append(f"close: max 12 words: shares {'fell' if not story['gain'] else 'rose'} "
+                       f"{f['price_change_pct']} to {f['price_now']}.")
+    return out
+
+
+def template_script(story, hook, beats):
+    f, s = story["facts"], story["series"]
+    name = f.get("company", "")
+    lines = []
+    for b in beats:
+        if b == "hook":
+            if s == "battle":
+                a, c = f["company_a"], f["company_b"]
+                lines.append({"you": f"You put $1,000 in {a} and $1,000 in {c}.",
+                              "question": f"{a} or {c}? $1,000 each, {f['start_year']}.",
+                              "imagine": f"Imagine $1,000 in {a} and $1,000 in {c}.",
+                              "number": f"$1,000 each. {a} versus {c}. {f['start_year']}."}.get(hook) or
+                             f"{a} or {c}? $1,000 each, {f['start_year']}.")
+            elif s == "shock":
+                lines.append(f"{name} just {f['direction']} {f['market_cap_change_say']} in one day.")
+            else:
+                when = {"ago": f"in {f['start_year']}", "crash": "in the 2020 crash",
+                        "ipo": "at its IPO", "peak": "at the very top"}[story["mode"]]
+                bare = when[3:] if when.startswith("in ") else when
+                lines.append({"you": f"You put $1,000 into {name} {when}.",
+                              "question": f"What happened to $1,000 in {name} {when}?",
+                              "imagine": f"Imagine $1,000 in {name} {when}.",
+                              "number": f"$1,000. {name}. {bare[:1].upper() + bare[1:]}.",
+                              "asked": f"You asked for {name}. $1,000 {when}."}.get(hook) or
+                             f"You put $1,000 into {name} {when}.")
+        elif b.startswith("e"):
+            e = next(x for x in f["events"] if x["id"] == b)
+            yr, k_ev = e["year"], int(b[1:])
+            if e["type"] == "lead":
+                lines.append(f"By {yr}, {e['leader']} pulls ahead." if e.get("pull") else
+                             f"By {yr}, {e['leader']} takes the lead." if k_ev == 1 else
+                             f"Then in {yr}, {e['leader']} strikes back.")
+            elif e["type"] == "milestone":
+                lines.append(f"By {yr}, your money had doubled." if e["multiple"].startswith("2 ") else
+                             [f"By {yr}, it was worth {e['value_say']}.", f"In {yr}, it hit {e['value_say']}.",
+                              f"{yr}: {e['multiple'].replace(' the money', '')} the money."][(k_ev - 1) % 3])
+            elif e["type"] == "drawdown":
+                lines.append([f"Then {yr} hit. It fell {e['drop_from_peak_pct']} from the top.",
+                              f"Then it crashed {e['drop_from_peak_pct']} in {yr}."][(k_ev - 1) % 2])
+            else:
+                lines.append({
+                    "half": f"By {yr}, half of it was gone.",
+                    "bottom": f"At the bottom, in {yr}, just {e['value_say']} was left.",
+                }[e["type"]])
+        elif b == "reveal":
+            v = f.get("final_value_say")
+            lines.append(f"Today: {f['company_a']} {f['final_a_say']}, {f['company_b']} {f['final_b_say']}."
+                         if s == "battle" else random.choice([f"Today, it's worth about {v}.", f"Today? About {v}.",
+                                                              f"Now it's worth about {v}."]))
+        elif b == "kicker":
+            if s == "battle":
+                lines.append(f"{f['winner']} wins by about {f['difference_say']}.")
+            elif f.get("sp500_say"):
+                beat = story["lines"][0][-1] > 1000 * story["ghost"][-1] / story["ghost"][0]
+                lines.append(random.choice([f"The S&P 500 made it {f['sp500_say']}.",
+                                            f"The S&P 500 turned it into {f['sp500_say']}."] +
+                                           ([f"The S&P 500? Just {f['sp500_say']}."] if beat else [])))
+            else:
+                lines.append(f"That's {f['multiple_say']} your money." if story["gain"] else
+                             f"That's {f['total_return_pct'].lstrip('-')} gone.")
+        elif b == "compare":
+            lines.append(f"That's more than all of {f['comparison']['company']} is worth.")
+        elif b == "person":
+            lines.append(f"About {f['per_american_say']} for every American.")
+        elif b == "reason":
+            lines.append(f"It wasn't alone: {f['sector_move']}." if f.get("sector_move") else
+                         "Traders are reacting to fresh company news.")
+        elif b == "close":
+            lines.append(f"Shares {'fell' if not story['gain'] else 'rose'} {f['price_change_pct']} "
+                         f"to {f['price_now']}.")
+    return lines
+
+
+def default_title(story):
+    f, s = story["facts"], story["series"]
+    if s == "battle":
+        return random.choice([f"{f['company_a']} vs {f['company_b']}: $1,000 Each, {f['years']} Years",
+                              f"$1,000 in {f['company_a']} or {f['company_b']}?"])
+    if s == "shock":
+        return f"{f['company']} Just {f['direction'].title()} {short_money(abs(story['delta']))} in One Day"
+    name = f["company"]
+    return {"ago": random.choice([f"$1,000 in {name} {story['years']} Years Ago…",
+                                  f"I Put $1,000 Into {name} in {f['start_year']}",
+                                  f"What $1,000 in {name} in {f['start_year']} Is Worth Now"]),
+            "crash": f"$1,000 in {name} During the 2020 Crash…",
+            "ipo": f"$1,000 in {name} at Its IPO…",
+            "peak": random.choice([f"Buying {name} at the Very Top…", f"$1,000 in {name} at Its Peak"])}[story["mode"]]
+
+
+def title_ok(title, story):
+    if not title or len(title) > 80:
+        return False
+    if story["series"] == "shock":
+        return True
+    f = story["facts"]
+    ok_nums = {1000.0, float(f.get("start_year", 0)), float(story.get("years", 0)), 2020.0}
+    return all(x in ok_nums or x <= 12 for x in numbers_in(INDEX_NAMES.sub("", title)))   # never reveal the result
+
+
+BANNED = re.compile(r"did you know|you should (buy|sell)|buy now|sell now|guarantee|financial advice|"
+                    r"not financial|subscribe|like and", re.I)
+
+
+def write_script(story, hook):
+    beats = beats_for(story)
+    allowed = collect_numbers(story["facts"]) + [1000.0]
+    limits = {"hook": 10, "kicker": 10, "person": 11, "reason": 15, "close": 13}
+    f = story["facts"]
+
+    def ok(d):
+        if not isinstance(d, dict) or not isinstance(d.get("lines"), list) or len(d["lines"]) != len(beats):
+            return False
+        for b, line in zip(beats, d["lines"]):
+            line = str(line).strip()
+            if not line or len(line.split()) > limits.get(b, 14) or BANNED.search(line):
+                return False
+            good, bad = numbers_ok(line, allowed)
+            if not good:
+                print("number not in data:", bad, "|", line)
+                return False
+        rev = beats.index("reveal") if "reveal" in beats else None
+        if rev is not None and story["series"] != "battle":
+            if not numbers_in(d["lines"][rev]):
+                return False
+        return bool(d.get("question"))
+
+    hook_style = HOOK_STYLE.get(hook, HOOK_STYLE["you"])
+    if f.get("company"):
+        hook_style = hook_style.replace("Netflix", f["company"]).replace("AMD", f["company"])
+    if f.get("company_a"):
+        hook_style = hook_style.replace("$1,000 in Netflix", f"$1,000 in {f['company_a']} vs {f['company_b']}") \
+            .replace("Netflix", f["company_a"])
+    if f.get("start_year"):
+        hook_style = hook_style.replace("2015", str(f["start_year"]))
+    series_txt = {"time_machine": "TIME MACHINE: what $1,000 in a famous stock became",
+                  "peak": "BOUGHT THE TOP: $1,000 invested at a stock's all-time high",
+                  "battle": "STOCK BATTLE: $1,000 in each of two rivals, a race to today",
+                  "shock": "MARKET SHOCK: today's biggest move in market value, in dollars"}[story["series"]]
+    prompt = (
+        f"You write the voice-over for a 15-22 second YouTube Short on the channel 'Bull & Bear Daily'. "
+        f"Series: {series_txt}. A live counter and chart on screen show the numbers as you speak.\n"
+        f"FACTS (the only source; use these numbers exactly or their '_say' rounding; never invent numbers, "
+        f"dates, reasons or quotes):\n{json.dumps(f, ensure_ascii=False)}\n"
+        f"Write exactly {len(beats)} lines, one per beat, in this order:\n- " + "\n- ".join(beat_rules(story, beats))
+        + f"\nHook style: {hook_style}\n"
+        "Rules: spoken American English, short and punchy, every line moves the story; no greetings; never "
+        "'Did you know'; never tell anyone to buy, sell or hold; money as '$' with digits (e.g. $287,000); "
+        "multiples as words like '28 times'; years as digits; the hook never reveals the ending.\n"
+        "Also return: question (max 12 words, makes people comment, e.g. which stock to run next; no advice), "
+        "title (max 60 characters, curiosity, must NOT reveal the final value, multiple or winner"
+        + ("" if story["series"] != "shock" else "; for this series the dollar move may be in the title")
+        + "), tags (6-10 short tags).\n"
+        'Return JSON: {"lines": ["..."], "question": "...", "title": "...", "tags": ["..."]}')
+    data = gemini(prompt, ok)
+    if not data:
+        print("script: template")
+        data = {"lines": template_script(story, hook, beats),
+                "question": random.choice(["Which stock should we run next?", "Would you have held on?",
+                                           "Which company should we test next?"]) if story["series"] != "battle" else
+                "Which battle should we run next?", "title": default_title(story),
+                "tags": []}
+    data["lines"] = [re.sub(r"\s+", " ", str(x)).strip() for x in data["lines"]]
+    if not title_ok(data.get("title"), story):
+        data["title"] = default_title(story)
+    data["beats"] = beats
+    return data
+
+
+# =========================================================================================================
+# audio: voice per line (exact timing), music by mood, synthesized SFX, mix
+# =========================================================================================================
+async def _tts_line(text, path):
+    import edge_tts
+    try:
+        comm = edge_tts.Communicate(text, VOICE, rate=RATE, boundary="WordBoundary")
+    except TypeError:
+        comm = edge_tts.Communicate(text, VOICE, rate=RATE)
+    words = []
+    with open(path, "wb") as fh_:
+        async for ch in comm.stream():
+            if ch["type"] == "audio":
+                fh_.write(ch["data"])
+            elif ch["type"] == "WordBoundary":
+                words.append((ch["text"], ch["offset"] / 1e7, ch["duration"] / 1e7))
+    return words
+
+
+def decode(path):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "s16le", "-ac", "1", "-ar", str(SR), "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+def estimate_words(text, t0, dur):
+    toks = text.split()
+    w = [len(t) + 2 for t in toks]
+    total, out, t = sum(w), [], t0
+    for tok, x in zip(toks, w):
+        d = dur * x / total
+        out.append((tok, t, d))
+        t += d
+    return out
+
+
+def align_words(text, events, t0, dur):
+    """Script tokens (with $ and punctuation) timed by the TTS word events; unmatched tokens take the next unused
+    event between their neighbours, else an interpolated time."""
+    toks = text.split()
+    if not events:
+        return estimate_words(text, t0, dur)
+    norm = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())
+    hits, p = [], 0
+    for tok in toks:
+        nt, hit = norm(tok), None
+        for q in range(p, min(p + 4, len(events))):
+            ne = norm(events[q][0])
+            if ne and nt and (nt.startswith(ne) or ne.startswith(nt)):
+                hit = q
+                break
+        hits.append(hit)
+        if hit is not None:
+            p = hit + 1
+    used = {h for h in hits if h is not None}
+    for k, h in enumerate(hits):
+        if h is None:
+            lo = max([x for x in hits[:k] if x is not None], default=-1)
+            hi = min([x for x in hits[k + 1:] if x is not None], default=len(events))
+            free = [q for q in range(lo + 1, hi) if q not in used]
+            if free:
+                hits[k] = free[0]
+                used.add(free[0])
+    out, last = [], t0
+    for k, tok in enumerate(toks):
+        if hits[k] is not None:
+            st, du = events[hits[k]][1], events[hits[k]][2]
+        else:
+            nxt = next((events[h][1] for h in hits[k + 1:] if h is not None), None)
+            st, du = (last if nxt is None or nxt <= last else (last + nxt) / 2), 0.2
+        st = max(st, last)
+        out.append((tok, st, du))
+        last = st + 0.01
+    return out
+
+
+def make_voice(lines, beats):
+    """TTS each line, trim silence, place with short gaps (a longer breath before the reveal)."""
+    tts = TTS_FN
+    t, segs, info = 0.12, [], []
+    for k, text in enumerate(lines):
+        mp3 = WORK / f"line{k}.mp3"
+        words = pcm = None
+        for attempt in range(3):
+            try:
+                words = tts(text, mp3)
+                pcm = decode(mp3)
+                break
+            except Exception as e:
+                print("voice failed:", type(e).__name__, str(e)[:120])
+                time.sleep(3 + 4 * attempt)
+        if pcm is None:
+            return None
+        loud = np.where(np.abs(pcm) > 0.02 * max(1e-6, float(np.abs(pcm).max())))[0] if len(pcm) else []
+        if len(pcm) < SR * 0.2 or len(loud) == 0:
+            return None
+        a = max(0, int(loud[0]) - int(0.02 * SR))
+        b = min(len(pcm), int(loud[-1]) + int(0.06 * SR))
+        seg = pcm[a:b]
+        lead = a / SR
+        dur = len(seg) / SR
+        words = align_words(text, [(w, t + max(0.0, o - lead), d) for w, o, d in words or []], t, dur)
+        info.append({"text": text, "start": t, "end": t + dur, "words": words})
+        segs.append((int(t * SR), seg))
+        nxt = beats[k + 1] if k + 1 < len(beats) else None
+        t += dur + (0.42 if nxt in ("reveal", "close") else 0.13)
+    total = int((t + 2.0) * SR)
+    voice = np.zeros(total, dtype=np.float32)
+    for pos, seg in segs:
+        voice[pos:pos + len(seg)] += seg[: max(0, total - pos)]
+    return {"lines": info, "pcm": voice, "end": info[-1]["end"]}
+
+
+def silent_voice(lines, beats):
+    t, info = 0.3, []
+    for k, text in enumerate(lines):
+        dur = 0.36 * len(text.split()) + 0.35
+        info.append({"text": text, "start": t, "end": t + dur, "words": estimate_words(text, t, dur)})
+        nxt = beats[k + 1] if k + 1 < len(beats) else None
+        t += dur + (0.45 if nxt in ("reveal", "close") else 0.15)
+    return {"lines": info, "pcm": np.zeros(int((t + 2.0) * SR), dtype=np.float32), "end": info[-1]["end"]}
+
+
+def edge_tts_fn(text, path):
+    return asyncio.run(_tts_line(text, path))
+
+
+TTS_FN = edge_tts_fn
+
+
+def write_wav(path, pcm, rate=SR):
+    data = (np.clip(pcm, -1, 1) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(data.tobytes())
+
+
+class Sfx:
+    def __init__(self, total):
+        self.buf = np.zeros(int(total * SR) + SR, dtype=np.float32)
+        self.rng = np.random.default_rng(7)
+
+    def add(self, t, sig, gain=1.0):
+        i = int(max(0, t) * SR)
+        n = min(len(sig), len(self.buf) - i)
+        if n > 0:
+            self.buf[i:i + n] += sig[:n] * gain
+
+    def env(self, n, attack=0.005, decay=0.2):
+        tt = np.arange(n) / SR
+        return np.minimum(1, tt / max(attack, 1e-4)) * np.exp(-tt / decay)
+
+    def noise(self, n, smooth=0.2):
+        x = self.rng.uniform(-1, 1, n).astype(np.float32)
+        y = np.empty_like(x)
+        acc = 0.0
+        for i in range(n):                              # one-pole low-pass
+            acc += smooth * (x[i] - acc)
+            y[i] = acc
+        return y
+
+    def whoosh(self, d=0.5):
+        n = int(d * SR)
+        nz = self.noise(n, 0.12)
+        shape = np.sin(np.linspace(0, np.pi, n)) ** 2
+        return nz * shape * 1.6
+
+    def tick(self):
+        n = int(0.025 * SR)
+        tt = np.arange(n) / SR
+        return np.sin(2 * np.pi * 2600 * tt) * np.exp(-tt / 0.004) * 0.6
+
+    def ding(self):
+        n = int(0.9 * SR)
+        tt = np.arange(n) / SR
+        return (np.sin(2 * np.pi * 1318.5 * tt) + 0.6 * np.sin(2 * np.pi * 1975.5 * tt)) * np.exp(-tt / 0.25) * 0.5
+
+    def drop(self):
+        n = int(0.7 * SR)
+        tt = np.arange(n) / SR
+        f = 420 * np.exp(-tt * 3.2) + 60
+        return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-tt / 0.35) * 0.8
+
+    def riser(self, d=1.2):
+        n = int(d * SR)
+        tt = np.arange(n) / SR
+        p = tt / d
+        f = 140 + 700 * p ** 2
+        tone = np.sin(2 * np.pi * np.cumsum(f) / SR) * 0.25
+        return (self.noise(n, 0.08 + 0.3 * 0.5) * 1.2 + tone) * p ** 2
+
+    def boom(self):
+        n = int(1.4 * SR)
+        tt = np.arange(n) / SR
+        f = 58 * (1 - 0.35 * tt / 1.4)
+        return (np.sin(2 * np.pi * np.cumsum(f) / SR) + 0.25 * self.noise(n, 0.05) * 3) * np.exp(-tt / 0.42)
+
+
+def music_track(mood):
+    tracks = sorted(MUSIC_DIR.glob("**/*.mp3")) if MUSIC_DIR.exists() else []
+    if not tracks:
+        return None
+    words = {"negative": ("dark", "sad", "cinematic", "tense", "suspense", "slowed"),
+             "neutral": ("lofi", "chill", "calm", "ambient", "vlog", "focus", "study")}
+
+    def mood_of(p):
+        nm = p.as_posix().lower()
+        for m, ws in words.items():
+            if any(w in nm for w in ws):
+                return m
+        return "positive"
+
+    fit = [p for p in tracks if mood_of(p) == mood] or tracks
+    return random.choice(fit)
 
 
 def probe_duration(path):
     try:
-        return float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                     "-of", "default=nw=1:nk=1", str(path)],
-                                    capture_output=True, text=True, check=True).stdout.strip())
+        return float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+                                     "default=nw=1:nk=1", str(path)], capture_output=True, text=True,
+                                    check=True).stdout.strip())
     except Exception:
         return 0.0
 
 
-def font_family():
-    try:
-        out = subprocess.run(["fc-scan", "--format", "%{family}", str(FONT)],
-                             capture_output=True, text=True, check=True).stdout
-        return out.split(",")[0].strip() or "DejaVu Sans"
-    except Exception:
-        return "DejaVu Sans"
-
-
-def gemini(prompt, ok, rounds=6):
-    models = [env("GEMINI_MODEL", "gemini-3.5-flash"), "gemini-flash-latest", "gemini-3.1-flash-lite"]
-    for _ in range(rounds):
-        for model in models:
-            try:
-                r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                                  params={"key": os.environ["GEMINI_API_KEY"]}, timeout=(15, 90),
-                                  json={"contents": [{"parts": [{"text": prompt}]}],
-                                        "generationConfig": {"responseMimeType": "application/json"}})
-                if not r.ok:
-                    print(model, r.status_code)
-                    continue
-                data = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
-                if ok(data):
-                    return data
-                print(model, "incomplete JSON")
-            except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
-                print(model, "error:", type(e).__name__)
-        time.sleep(60)
-    raise SystemExit("Gemini unavailable, try later")
-
-
-def plain(t):
-    return re.sub(r"\[/?[ry]\]", "", str(t)).strip()
-
-
-def caps(t):
-    """Upper-case text but keep the [r]/[y] markers and /yr working."""
-    t = str(t).upper()
-    for m in ("R", "Y"):
-        t = t.replace(f"[{m}]", f"[{m.lower()}]").replace(f"[/{m}]", f"[/{m.lower()}]")
-    return t
-
-
-def to_ass(t):
-    t = caps(t).replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ")
-    t = re.sub(r"\[(r|y)\]([^\[]*?[+\-−]\d[^\[]*?)\[/\1\]", r"\2", t)    # signed numbers get their own colour
-    t = SIGNED.sub(lambda m: f"{{\\c{GREEN_ASS if m.group(1) == '+' else RED_ASS}}}{m.group(0)}{{\\c{WHITE}}}", t)
-    for tag, col in (("r", RED), ("y", YELLOW)):
-        t = re.sub(rf"\[{tag}\](.*?)\[/{tag}\]", lambda m: f"{{\\c{col}}}{m.group(1)}{{\\c{WHITE}}}", t)
-    return plain(t)
-
-
-def ass_time(sec):
-    cs = int(round(max(0, sec) * 100))
-    return f"{cs // 360000}:{(cs // 6000) % 60:02d}:{(cs // 100) % 60:02d}.{cs % 100:02d}"
-
-
-async def _tts(text, path):
-    import edge_tts
-    try:
-        comm = edge_tts.Communicate(text, VOICE, rate="+5%", boundary="WordBoundary")
-    except TypeError:
-        comm = edge_tts.Communicate(text, VOICE, rate="+5%")
-    words = []
-    with open(path, "wb") as f:
-        async for chunk in comm.stream():
-            if chunk["type"] == "audio":
-                f.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                words.append((chunk["text"], chunk["offset"] / 1e7))
-    return words
-
-
-def tighten(path, words):
-    """Cuts every pause longer than 0.25 s down to ~0.12 s and shifts the word timings to match."""
-    log = subprocess.run(["ffmpeg", "-i", str(path), "-af", "silencedetect=noise=-40dB:d=0.25", "-f", "null", "-"],
-                         capture_output=True, text=True).stderr
-    starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", log)]
-    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", log)]
-    cuts = [(a + 0.06, b - 0.06) for a, b in zip(starts, ends) if b - a > 0.25]
-    if not cuts:
-        return words
-    keep, prev = [], 0.0
-    for a, b in cuts:
-        keep.append(f"between(t,{prev:.3f},{a:.3f})")
-        prev = b
-    keep.append(f"gte(t,{prev:.3f})")
-    tmp = path.with_name("voice_tight.mp3")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-af",
-                    f"aselect='{'+'.join(keep)}',asetpts=N/SR/TB", str(tmp)], check=True)
-    tmp.replace(path)
-    shift = lambda t: t - sum(b - a for a, b in cuts if b <= t + 0.001)
-    return [(w[0], max(0.0, shift(w[1])), *w[2:]) for w in words]
-
-
-def build_sfx(total, timed, cuts, shots, path):
-    """Synthesized sounds. Discrete effects never closer than 1 s (the most important wins); under them a low
-    tension bed that keeps rising and cuts off on the last frame, so the loop restarts the tension."""
-    sr = 22050
-    buf = [0.0] * int(sr * (total + 0.05))
-    rnd = random.Random(len(timed) * 31 + int(total * 10))
-
-    def add(start, samples, gain=1.0):
-        i0 = int(start * sr)
-        for k, v in enumerate(samples[:max(0, len(buf) - i0)]):
-            buf[i0 + k] += v * gain
-
-    def noise(n, alpha):                              # low-passed noise
-        y, out = 0.0, []
-        for _ in range(n):
-            y += alpha * (rnd.uniform(-1, 1) - y)
-            out.append(y)
-        return out
-
-    def tap():
-        n = int(0.05 * sr)
-        nz = noise(n, 0.18)
-        return [nz[k] * math.exp(-k / (0.008 * sr)) * 0.9 +
-                0.25 * math.sin(2 * math.pi * 180 * k / sr) * math.exp(-k / (0.012 * sr)) for k in range(n)]
-
-    def whoosh(d=0.5):
-        n, y, out = int(d * sr), 0.0, []
-        for k in range(n):
-            p = k / n
-            y += (0.03 + 0.2 * math.sin(math.pi * p)) * (rnd.uniform(-1, 1) - y)
-            out.append(y * math.sin(math.pi * p) ** 2)
-        return out
-
-    def boom(f0=55, d=1.4, nmix=0.3):
-        n, ph, out = int(d * sr), 0.0, []
-        nz = noise(n, 0.05)
-        for k in range(n):
-            t = k / sr
-            ph += 2 * math.pi * f0 * (1 - 0.35 * t / d) / sr
-            out.append((math.sin(ph) + nmix * nz[k] * 3) * math.exp(-t / (d * 0.3)))
-        return out
-
-    def funny():                                       # a silly sound that does not match the picture
-        kind, n, ph, out = rnd.choice(["boing", "fart", "slide"]), int(0.6 * sr), 0.0, []
-        for k in range(n):
-            t = k / sr
-            if kind == "boing":
-                f = 180 + 120 * math.sin(2 * math.pi * 9 * t) * math.exp(-t * 4)
-                v = math.sin(ph) * math.exp(-t * 4)
-            elif kind == "fart":
-                f = 70 + 25 * rnd.uniform(-1, 1) - 30 * t
-                v = (2 * (ph / (2 * math.pi) % 1) - 1) * min(1, t * 30) * math.exp(-t * 3)
+def make_audio(story, timing, voice):
+    T = timing["T"]
+    vpath, spath, out = WORK / "voice.wav", WORK / "sfx.wav", WORK / "mix.wav"
+    pcm = voice["pcm"][: int(T * SR)]
+    pcm = np.pad(pcm, (0, max(0, int(T * SR) - len(pcm))))
+    write_wav(vpath, pcm)
+    sfx = Sfx(T)
+    if SFX_ON:
+        sfx.add(0.0, sfx.whoosh(0.45), 0.5)
+        for t in timing.get("ticks", []):
+            sfx.add(t, sfx.tick(), 0.18)
+        for ev in timing.get("event_times", []):
+            if ev["kind"] in ("drawdown", "half", "bottom"):
+                sfx.add(ev["t"], sfx.drop(), 0.55)
+            elif ev["kind"] in ("milestone", "person"):
+                sfx.add(ev["t"], sfx.ding(), 0.35)
             else:
-                f = 400 + 900 * t
-                v = math.sin(ph) * min(1, t * 20, (0.6 - t) * 10)
-            ph += 2 * math.pi * f / sr
-            out.append(0.8 * v)
-        return out
-
-    events = []                                        # (time, priority, samples, gain)
-    events.append((0.0, 9, boom(60, 1.0, 0.3), 0.8))
-    for idx, (text, s, _) in enumerate(timed):
-        events.append((s, 5 if "[r]" in text else 2, boom(80, 0.5, 0.15) if "[r]" in text else tap(),
-                       0.3 if "[r]" in text else 0.55))
-    for t in cuts:
-        events.append((max(0, t - 0.2), 3, whoosh(0.45), 0.45))
-    t = 0.0
-    for sh in shots:
-        if sh["kind"] == "split":
-            events.append((t + 0.05, 7, boom(60, 0.9, 0.35), 0.6))
-        t += sh["dur"]
-    events.append((max(0, total - shots[-1]["dur"]), 8, boom(70, 0.8, 0.3), 0.7))   # payoff hit
-    if CATEGORY == "classified":                     # soft Morse ... --- ...
-        morse = []
-        for d in [0.07] * 3 + [0.21] * 3 + [0.07] * 3:
-            n = int(d * sr)
-            morse += [0.35 * math.sin(2 * math.pi * 650 * k / sr) * min(1, k / 80, (n - k) / 80) for k in range(n)]
-            morse += [0.0] * int(0.07 * sr)
-        events.append((0.5, 6, morse, 0.5))
-    if KIND != "quiz" and CATEGORY in ("myth", "versus") and len(timed) > 2 and rnd.random() < FUNNY:
-        events.append((timed[1][1] + 0.3, 8, funny(), 0.6))
-    taken = []
-    for t, prio, smp, g in sorted(events, key=lambda e: -e[1]):
-        if all(abs(t - u) >= 1.0 for u in taken):      # max 1 effect per second
-            taken.append(t)
-            add(t, smp, g)
-    bed = noise(len(buf), 0.006)                       # rising tension bed + slow low drone, hard cut at end
-    ph = 0.0
-    for k in range(len(buf)):
-        p = k / len(buf)
-        ph += 2 * math.pi * (42 + 14 * p) / sr
-        buf[k] += (bed[k] * 1.8 + 0.12 * math.sin(ph)) * (0.25 + 1.6 * p * p) * min(1, k / (0.3 * sr))
-    peak = max(1e-6, max(abs(v) for v in buf))
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes(array.array("h", (int(v / peak * 26000) for v in buf)).tobytes())
+                sfx.add(ev["t"] - 0.15, sfx.whoosh(0.4), 0.45)
+        tr = timing.get("t_reveal")
+        if tr:
+            sfx.add(max(0, tr - 1.1), sfx.riser(1.1), 0.35)
+            sfx.add(tr, sfx.boom(), 0.7)
+            if story.get("gain"):
+                sfx.add(tr + 0.05, sfx.ding(), 0.3)
+    peak = float(np.abs(sfx.buf).max()) or 1.0
+    write_wav(spath, sfx.buf[: int(T * SR)] / max(peak, 1.0) * 0.9)
+    args, chains = ["-i", str(vpath)], ["[0:a]aresample=44100,highpass=f=70,"
+                                         "acompressor=threshold=-20dB:ratio=3:attack=5:release=90[v]"]
+    mix = "[v]"
+    n_in = 1
+    track = music_track(story["mood"])
+    if track:
+        dur = probe_duration(track)
+        start = round(random.uniform(0, max(0.0, dur - T - 3) * 0.5), 1)
+        args += ["-ss", str(start), "-stream_loop", "-1", "-i", str(track)]
+        chains.append(f"[{n_in}:a]aresample=44100,volume={MUSIC_VOL},afade=t=in:d=0.4,"
+                      f"afade=t=out:st={max(0, T - 1.3):.2f}:d=1.3[m]")
+        mix += "[m]"
+        n_in += 1
+        print("music:", track.name)
+    args += ["-i", str(spath)]
+    chains.append(f"[{n_in}:a]aresample=44100,volume={0.55 * SFX_VOL:.3f}[s]")
+    mix += "[s]"
+    n_in += 1
+    chains.append(f"{mix}amix=inputs={n_in}:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[a]")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "error", *args, "-filter_complex", ";".join(chains), "-map", "[a]",
+                        "-t", f"{T:.3f}", "-ar", "44100", "-ac", "2", str(out)], check=True)
+    except subprocess.CalledProcessError:
+        if not track:
+            raise
+        print("music skipped (ffmpeg error)")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(vpath), "-i", str(spath), "-filter_complex",
+                        "[0:a]aresample=44100,highpass=f=70,acompressor=threshold=-20dB:ratio=3:attack=5:release=90[v];"
+                        f"[1:a]aresample=44100,volume={0.55 * SFX_VOL:.3f}[s];"
+                        "[v][s]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[a]",
+                        "-map", "[a]", "-t", f"{T:.3f}", "-ar", "44100", "-ac", "2", str(out)], check=True)
+    return out
 
 
-def render(ass_path, total):
-    args = ["-i", "bg.mp4"]
-    on = f"enable='gte(t,{COVER_END:.2f})'"
-    fc = [f"[0:v]drawbox=x=0:y={TOP_BAR - 2}:w=1080:h=2:color={ACCENT}@1:t=fill:{on},drawbox=x=0:y={BOT_Y}:w=1080:"
-          f"h=2:color={ACCENT}@1:t=fill:{on},ass={ass_path.resolve()}:fontsdir={FONTS_DIR}[v]"]
-    srcs = []                                        # (input args, filter) for each audio layer
-    if NARRATION:
-        srcs.append((["-i", "voice.mp3"], "highpass=f=90,lowpass=f=8500,deesser=i=0.6"))
-    if MUSIC.exists():
-        srcs.append((["-ss", str(MUSIC_START), "-stream_loop", "-1", "-i", str(MUSIC.resolve())],
-                     f"volume={MUSIC_VOL},afade=t=in:d=0.3"))
-    if SFX and (W / "sfx.wav").exists():
-        srcs.append((["-i", "sfx.wav"], f"lowpass=f=6000,volume={0.12 * SFX_VOL:.3f}"))
-    if not srcs:
-        srcs.append((["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"], "anull"))
-    for k, (a, f) in enumerate(srcs, 1):
-        args += a
-        fc.append(f"[{k}:a]aresample=44100,{f}[a{k}]")
-    fc.append("".join(f"[a{k}]" for k in range(1, len(srcs) + 1))
-              + f"amix=inputs={len(srcs)}:duration=longest:normalize=0[a]")
-    ff(*args, "-filter_complex", ";".join(fc), "-map", "[v]", "-map", "[a]", "-t", f"{total:.3f}", *x264(21),
-       "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", "final.mp4")
+# =========================================================================================================
+# timing: chart progress follows the voice (each event is reached exactly when its line starts)
+# =========================================================================================================
+def make_timing(story, voice, beats):
+    lines = voice["lines"]
+    starts = {b: ln["start"] for b, ln in zip(beats, lines)}
+    T = max(12.0, voice["end"] + 1.8)
+    timing = {"T": T, "lines": lines, "starts": starts, "voice_end": voice["end"], "event_times": []}
+    if story["series"] == "shock":
+        tc = max(1.6, starts.get("compare", starts.get("person", 2.0)) - 0.2)
+        timing["t_count"] = tc
+        timing["t_reveal"] = tc                        # the counter lands = the hit
+        for b in ("compare", "person"):
+            if b in starts:
+                timing["event_times"].append({"t": starts[b], "kind": b, "i": 0})
+        ticks, last_v, last_t = [], 0.0, -1.0
+        for k in range(int(tc * FPS)):
+            t = k / FPS
+            v = shock_value(t, tc)
+            if v - last_v >= 0.05 and t - last_t >= 0.085:
+                ticks.append(t)
+                last_v, last_t = v, t
+        timing["ticks"] = ticks
+        return timing
+    n = len(story["months"])
+    anchors = [(0.0, 0.0)]
+    for e in story["events"]:
+        t = starts[e["id"]]
+        f = max(anchors[-1][1] + 0.02, e["i"] / (n - 1))
+        anchors.append((t, min(f, 0.97)))
+    t_rev = starts["reveal"]
+    anchors.append((max(t_rev, anchors[-1][0] + 0.4), 1.0))
+    timing["anchors"] = anchors
+    timing["t_reveal"] = t_rev
+    timing["t_kicker"] = starts.get("kicker")
+    for e in story["events"]:
+        timing["event_times"].append({"t": starts[e["id"]], "kind": e["kind"], "i": e["i"]})
+    # counter ticks: one per 4% change of the value, at most ~12 per second
+    vals = story["lines"][0]
+    ticks, last_v, last_t = [], vals[0], -1.0
+    for k in range(int(t_rev * FPS) + 1):
+        t = k / FPS
+        v = interp(vals, progress(anchors, t) * (n - 1))
+        if abs(math.log(max(v, 1e-6) / max(last_v, 1e-6))) >= 0.04 and t - last_t >= 0.085:
+            ticks.append(t)
+            last_v, last_t = v, t
+    timing["ticks"] = ticks
+    return timing
 
 
+def shock_value(t, tc):
+    """Share of the day's move shown by the counter (starts at 35% so the first frame already hits)."""
+    return 0.35 + 0.65 * ease_out(t / tc)
+
+
+def progress(anchors, t):
+    if t <= anchors[0][0]:
+        return anchors[0][1]
+    for (t0, f0), (t1, f1) in zip(anchors, anchors[1:]):
+        if t <= t1:
+            x = (t - t0) / max(1e-6, t1 - t0)
+            if (t1, f1) == anchors[-1]:
+                x = 1 - (1 - x) ** 1.6                 # ease into the reveal
+            else:
+                x = 0.55 * x + 0.45 * x * x * (3 - 2 * x)   # slow down at each event
+            return f0 + (f1 - f0) * x
+    return anchors[-1][1]
+
+
+def interp(vals, x):
+    x = clamp(x, 0, len(vals) - 1)
+    i = int(x)
+    if i >= len(vals) - 1:
+        return vals[-1]
+    return vals[i] + (vals[i + 1] - vals[i]) * (x - i)
+
+
+STOPWORDS = {"a", "an", "the", "in", "into", "of", "to", "by", "at", "on", "for", "and", "or", "your", "its", "it",
+             "was", "is", "just", "about", "than", "had", "has", "with", "from", "that", "this", "you", "be"}
+BREAK_BEFORE = {"in", "into", "by", "at", "on", "for", "to", "from", "with", "than", "and", "or", "but"}
+
+
+def caption_chunks(lines):
+    """1-4 word chunks that follow the phrasing: break on punctuation or before a preposition, never end a chunk
+    on a little word, never leave one word hanging."""
+    chunks = []
+    for ln in lines:
+        words = ln["words"]
+        cur = []
+        for k, w in enumerate(words):
+            cur.append(w)
+            txt = " ".join(x[0] for x in cur)
+            left = len(words) - k - 1
+            nxt = re.sub(r"[^a-z]", "", words[k + 1][0].lower()) if left else ""
+            punct = re.search(r"[.,!?;:]$", w[0])
+            small = re.sub(r"[^a-z']", "", w[0].lower()) in STOPWORDS
+            full = len(cur) >= 3 or len(txt) >= 15
+            soft = len(cur) >= 2 and nxt in BREAK_BEFORE and left >= 3 and len(txt) >= 8
+            brk = punct or ((full or soft) and not small) or len(cur) >= 4
+            if brk and not punct and left == 1 and len(txt) + len(words[-1][0]) <= 20:
+                brk = False
+            if brk or left == 0:
+                chunks.append({"words": cur, "t0": cur[0][1], "line_end": ln["end"]})
+                cur = []
+    for k, c in enumerate(chunks):
+        nxt = chunks[k + 1]["t0"] if k + 1 < len(chunks) else c["line_end"] + 0.3
+        c["t1"] = min(nxt, c["line_end"] + 0.3) if nxt - c["line_end"] > 0.05 else nxt
+    return chunks
+
+
+# =========================================================================================================
+# drawing
+# =========================================================================================================
+FONT_URLS = {
+    "anton": "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
+    "barlow": "https://raw.githubusercontent.com/google/fonts/main/ofl/barlowsemicondensed/"
+              "BarlowSemiCondensed-Bold.ttf",
+    "barlowm": "https://raw.githubusercontent.com/google/fonts/main/ofl/barlowsemicondensed/"
+               "BarlowSemiCondensed-SemiBold.ttf",
+}
+FONT_FALLBACK = ["/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+
+
+def ensure_fonts():
+    FONT_DIR.mkdir(exist_ok=True)
+    for name, url in FONT_URLS.items():
+        p = FONT_DIR / f"{name}.ttf"
+        if p.exists() or env("FONT_DOWNLOAD", "1") != "1":
+            continue
+        r = http_get(url, tries=2)
+        if r is not None and r.status_code == 200 and len(r.content) > 10000:
+            p.write_bytes(r.content)
+
+
+@functools.lru_cache(maxsize=None)
+def font(name, size):
+    for p in [FONT_DIR / f"{name}.ttf"] + FONT_FALLBACK:
+        try:
+            return ImageFont.truetype(str(p), size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def text_w(d, txt, f, stroke=0):
+    b = d.textbbox((0, 0), txt, font=f, stroke_width=stroke)
+    return b[2] - b[0]
+
+
+def pill(d, x, y, txt, f, fg, bg, pad=(18, 9), anchor="l", outline=None):
+    w = text_w(d, txt, f)
+    asc, desc = f.getmetrics()
+    h = asc + desc
+    x0 = x if anchor == "l" else x - (w + 2 * pad[0]) / 2 if anchor == "c" else x - (w + 2 * pad[0])
+    box = [x0, y, x0 + w + 2 * pad[0], y + h + 2 * pad[1]]
+    d.rounded_rectangle(box, radius=(h + 2 * pad[1]) // 2, fill=bg, outline=outline, width=3 if outline else 0)
+    d.text((x0 + pad[0], y + pad[1]), txt, font=f, fill=fg)
+    return box
+
+
+def mix(c1, c2, a):
+    return tuple(int(c1[i] * (1 - a) + c2[i] * a) for i in range(3))
+
+
+def brand_mark(size=40):
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, size - 1, size - 1], radius=size // 5, fill=(18, 34, 66, 255))
+    s = size
+    d.polygon([(s * 0.18, s * 0.62), (s * 0.36, s * 0.26), (s * 0.54, s * 0.62)], fill=GREEN + (255,))
+    d.polygon([(s * 0.48, s * 0.40), (s * 0.82, s * 0.40), (s * 0.65, s * 0.78)], fill=RED + (255,))
+    return im
+
+
+def logo_tile(sym, size):
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tile)
+    lg = None if sym in ETFS else logo_image(sym)
+    if lg is not None:
+        td.rounded_rectangle([0, 0, size - 1, size - 1], radius=size // 5, fill=(255, 255, 255, 255))
+        lg = lg.copy()
+        lg.thumbnail((int(size * 0.76), int(size * 0.76)), Image.LANCZOS)
+        tile.alpha_composite(lg, ((size - lg.width) // 2, (size - lg.height) // 2))
+        return tile
+    td.rounded_rectangle([0, 0, size - 1, size - 1], radius=size // 5, fill=(28, 48, 92, 255))
+    label = "S&P" if sym == "SPY" else "NDX" if sym == "QQQ" else sym[:4]
+    f = font("anton", int(size * (0.42 if len(label) <= 3 else 0.34)))
+    w = text_w(td, label, f)
+    asc, desc = f.getmetrics()
+    td.text(((size - w) / 2, (size - asc - desc) / 2), label, font=f, fill=WHITE)
+    return tile
+
+
+def gradient_bg(story):
+    y = np.linspace(0, 1, HT, dtype=np.float32)[:, None]
+    top, bot = np.array(BG1, np.float32), np.array(BG2, np.float32)
+    if story["series"] == "shock" and not story["gain"]:
+        top = np.array((44, 12, 20), np.float32)
+    col = top * (1 - y) + bot * y
+    img = np.repeat(col[:, None, :], WD, axis=1)
+    xx = np.linspace(-1, 1, WD, dtype=np.float32)[None, :]
+    yy = np.linspace(-1, 1, HT, dtype=np.float32)[:, None]
+    vig = 1 - 0.35 * np.clip(xx ** 2 * 0.8 + yy ** 2 * 0.6, 0, 1)
+    img = (img * vig[..., None]).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(img, "RGB")
+
+
+def headline_image(segs_lines):
+    tmp = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    size = 96
+    while size > 52:
+        f = font("anton", size)
+        if all(text_w(tmp, "".join(s for s, _ in line), f) <= 930 for line in segs_lines):
+            break
+        size -= 4
+    f = font("anton", size)
+    lh = int(size * 1.08)
+    im = Image.new("RGBA", (WD, lh * len(segs_lines) + 20), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for k, line in enumerate(segs_lines):
+        w = text_w(d, "".join(s for s, _ in line), f)
+        x = (WD - w) / 2
+        for s, c in line:
+            d.text((x, k * lh), s, font=f, fill=c, stroke_width=3, stroke_fill=(0, 0, 0))
+            x += text_w(d, s, f)
+    return im
+
+
+class Scene:
+    def __init__(self, story, script, timing):
+        self.s, self.sc, self.tm = story, script, timing
+        self.kind = story["series"]
+        self.bg = self.static_bg()
+        self.head = headline_image(story["headline"])
+        self.caps = caption_chunks(timing["lines"])
+        self.n = len(story["months"])
+        self.ymax = self.ymin = None
+        self.tiles = {sym: logo_tile(sym, 72) for sym in story["tickers"]}
+        self.big_tiles = {sym: logo_tile(sym, 64) for sym in story["tickers"]}
+        rng = random.Random(3)
+        self.parts = [(rng.uniform(120, 960), rng.uniform(560, 660), rng.uniform(-260, 260), rng.uniform(-900, -350),
+                       rng.choice([GREEN, GOLD, WHITE, CYAN]), rng.uniform(8, 16)) for _ in range(110)]
+        if self.n:
+            self.cmax = [max(max(line[: i + 1]) for line in story["lines"]) for i in range(self.n)]
+            self.cmin = [min(min(line[: i + 1]) for line in story["lines"]) for i in range(self.n)]
+            if story["ghost"]:
+                g = story["ghost"]
+                gn = [1000 * v / g[0] for v in g]
+                self.ghost = gn
+                self.cmax = [max(a, max(gn[: i + 1])) for i, a in enumerate(self.cmax)]
+                self.cmin = [min(a, min(gn[: i + 1])) for i, a in enumerate(self.cmin)]
+            else:
+                self.ghost = None
+            self.grads = {}
+        self.events = story["events"]
+
+    # ---- static layer ---------------------------------------------------------------------------------
+    def static_bg(self):
+        s = self.s
+        img = gradient_bg(s)
+        d = ImageDraw.Draw(img)
+        for x in range(0, WD, 90):
+            d.line([(x, 0), (x, HT)], fill=mix(BG2, GRID, 0.35), width=1)
+        for y in range(0, HT, 90):
+            d.line([(0, y), (WD, y)], fill=mix(BG2, GRID, 0.35), width=1)
+        mark = brand_mark(40)
+        img.paste(mark, (70, BRAND_Y), mark)
+        d.text((122, BRAND_Y + 3), CHANNEL, font=font("barlow", 32), fill=(214, 222, 236))
+        num = sum(1 for v in STATE["videos"] if v.get("series") == s["series"]) + 1
+        tag = f"{SERIES_INFO[s['series']][0]} #{num}"
+        col = {"time_machine": BLUE, "peak": RED, "battle": (124, 58, 237), "shock": RED}[s["series"]]
+        pill(d, 900, BRAND_Y - 2, tag, font("barlow", 28), WHITE, col, pad=(16, 6), anchor="r")
+        if self.kind != "shock":
+            d.line([(CX0, CY1), (CX1, CY1)], fill=mix(BG2, MUTED, 0.45), width=2)
+            months = s["months"]
+            n = len(months)
+            f = font("barlowm", 26)
+            for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+                i = round(frac * (n - 1))
+                lab = "NOW" if frac == 1.0 else months[i][:4]
+                x = CX0 + frac * (CX1 - CX0)
+                w = text_w(d, lab, f)
+                d.text((min(max(CX0, x - w / 2), CX1 - w), CY1 + 8), lab, font=f, fill=MUTED)
+            note = ("ADJ. FOR SPLITS & DIVIDENDS" if s.get("div") else "PRICE ONLY") + \
+                   " · HYPOTHETICAL · NOT FINANCIAL ADVICE"
+            d.text((CX0, CY1 + 40), note, font=font("barlowm", 21), fill=DIM)
+        else:
+            d.text((CX0, 1290), "MARKET VALUE = SHARES OUTSTANDING × PRICE · NOT FINANCIAL ADVICE",
+                   font=font("barlowm", 21), fill=DIM)
+        return img
+
+    # ---- helpers ---------------------------------------------------------------------------------------
+    def f_at(self, t):
+        return progress(self.tm["anchors"], t)
+
+    def X(self, i):
+        return CX0 + (i / max(1, self.n - 1)) * (CX1 - CX0)
+
+    def Y(self, v):
+        return CY1 - 6 - (v - self.ymin) / max(1e-6, self.ymax - self.ymin) * (CY1 - CY0 - 12)
+
+    def scale_to(self, x):
+        i = min(self.n - 1, int(math.ceil(x)))
+        hi = self.cmax[i] * 1.14
+        lo = max(0.0, min(self.cmin[i], 1000) * 0.86)
+        if self.ymax is None:
+            self.ymax, self.ymin = hi, lo
+            return
+        self.ymax += (hi - self.ymax) * (0.35 if hi > self.ymax else 0.08)
+        self.ymin += (lo - self.ymin) * (0.35 if lo < self.ymin else 0.08)
+        vals = [interp(line, x) for line in self.s["lines"]] + ([interp(self.ghost, x)] if self.ghost else [])
+        span = self.ymax - self.ymin
+        if max(vals) > self.ymax - 0.03 * span:            # the line always stays inside the box
+            self.ymax = max(vals) + 0.05 * span
+        if min(vals) < self.ymin + 0.03 * span:
+            self.ymin = max(0.0, min(vals) - 0.05 * span)
+
+    def grad(self, col):
+        if col not in self.grads:
+            h = CY1 - CY0
+            a = (np.linspace(120, 0, h, dtype=np.float32) ** 1.0).astype(np.uint8)
+            alpha = Image.fromarray(np.repeat(a[:, None], CX1 - CX0 + 2, axis=1), "L")
+            self.grads[col] = (Image.new("RGB", alpha.size, col), alpha)
+        return self.grads[col]
+
+    # ---- frame -----------------------------------------------------------------------------------------
+    def frame(self, t):
+        img = self.bg.copy()
+        d = ImageDraw.Draw(img)
+        self.draw_head(img, t)
+        if self.kind == "shock":
+            self.draw_shock(img, d, t)
+        else:
+            x = self.f_at(t) * (self.n - 1)
+            self.scale_to(x)
+            if self.kind == "battle":
+                self.draw_battle_cards(img, d, t, x)
+            else:
+                self.draw_single_top(img, d, t, x)
+            self.draw_chart(img, d, t, x)
+        self.draw_captions(d, t)
+        self.draw_cta(d, t)
+        return self.effects(img, t)
+
+    def draw_head(self, img, t):
+        img.paste(self.head, (0, HEAD_Y), self.head)
+
+    def draw_single_top(self, img, d, t, x):
+        s = self.s
+        sym = s["tickers"][0]
+        tile = self.tiles[sym]
+        img.paste(tile, (70, ROW_Y - 8), tile)
+        box = pill(d, 160, ROW_Y + 4, sym, font("barlow", 36), WHITE, (36, 56, 98), pad=(14, 4))
+        sub = {"ago": "", "crash": " · COVID CRASH", "ipo": " · IPO MONTH", "peak": " · ALL-TIME HIGH"}[s["mode"]]
+        d.text((box[2] + 16, ROW_Y + 10), f"BOUGHT {month_label(s['months'][0]).upper()}{sub}", font=font("barlow", 36),
+               fill=RED if s["mode"] == "peak" else MUTED)
+        v = interp(s["lines"][0], x)
+        col = GREEN if v > 1000.5 else RED if v < 999.5 else WHITE
+        tr = self.tm["t_reveal"]
+        size = 168
+        if tr and t >= tr:
+            size = int(168 * (1 + 0.16 * (1 - ease_out((t - tr) / 0.35))))
+            col = GREEN if s["gain"] else RED
+        f = font("anton", size)
+        d.text((70, COUNTER_Y + (168 - size) * 0.6), money(v), font=f, fill=col, stroke_width=2, stroke_fill=(0, 0, 0))
+        m = v / 1000
+        cx = 70
+        if m >= 1.25 or m <= 0.9:
+            box = pill(d, cx, CHIP_Y, mult_chip(m), font("anton", 46), (10, 10, 10), GOLD if m >= 1 else RED,
+                       pad=(18, 4))
+            cx = box[2] + 14
+        ym = s["months"][min(self.n - 1, int(round(x)))]
+        tk = self.tm.get("t_kicker")
+        if tk and t >= tk and self.ghost:
+            pill(d, cx, CHIP_Y, f"S&P 500: {money(self.ghost[-1])}", font("anton", 46), WHITE, (52, 64, 92),
+                 pad=(18, 4))
+        else:
+            lab = "TODAY" if (tr and t >= tr) else month_label(ym).upper()
+            pill(d, cx, CHIP_Y, lab, font("anton", 46), WHITE, CARD, pad=(18, 4), outline=(46, 66, 104))
+
+    def draw_battle_cards(self, img, d, t, x):
+        s = self.s
+        tr = self.tm["t_reveal"]
+        done = bool(tr and t >= tr)
+        vals = [interp(line, x) for line in s["lines"]]
+        lead = None if abs(vals[0] / vals[1] - 1) < 0.01 else (0 if vals[0] > vals[1] else 1)
+        top = ROW_Y + 22
+        for k, (sym, col) in enumerate(zip(s["tickers"], (CYAN, ORANGE))):
+            x0 = 70 if k == 0 else 495
+            box = [x0, top, x0 + 405, top + 230]
+            win = done and sym == s["winner"]
+            hot = (k == lead) if not done else win
+            d.rounded_rectangle(box, radius=26, fill=CARD, outline=col if hot else mix(CARD, col, 0.35),
+                                width=6 if hot else 3)
+            tile = self.big_tiles[sym]
+            img.paste(tile, (x0 + 18, top + 26), tile)
+            nm = screen_name(sym)
+            fz = 40
+            while text_w(d, nm, font("barlow", fz)) > 285 and fz > 24:
+                fz -= 2
+            d.text((x0 + 94, top + 38), nm, font=font("barlow", fz), fill=WHITE)
+            size = 92
+            if win:
+                size = int(92 * (1 + 0.16 * (1 - ease_out((t - tr) / 0.35))))
+            txt = money(vals[k])
+            while text_w(d, txt, font("anton", size)) > 370 and size > 50:
+                size -= 4
+            d.text((x0 + 20, top + 96 + (92 - size) * 0.9), txt, font=font("anton", size), fill=col)
+            if hot and not done:
+                self.crown(d, x0 + 360, top - 34)
+            if win:
+                pill(d, x0 + 202, top - 30, "WINNER", font("anton", 36), (10, 10, 10), GOLD, pad=(20, 2), anchor="c")
+        ym = s["months"][min(self.n - 1, int(round(x)))]
+        lab = "TODAY" if done else month_label(ym).upper()
+        pill(d, 70, top + 250, lab, font("anton", 40), WHITE, CARD, pad=(16, 3), outline=(46, 66, 104))
+
+    def crown(self, d, x, y):
+        pts = [(x - 26, y + 26), (x - 30, y), (x - 13, y + 12), (x, y - 6), (x + 13, y + 12), (x + 30, y), (x + 26, y + 26)]
+        d.polygon(pts, fill=GOLD)
+        d.rectangle([x - 26, y + 24, x + 26, y + 32], fill=GOLD)
+
+    def draw_chart(self, img, d, t, x):
+        s = self.s
+        # grid + y labels
+        span = self.ymax - self.ymin
+        step = 10 ** math.floor(math.log10(max(span / 3, 1e-6)))
+        for mlt in (1, 2, 5, 10):
+            if span / (step * mlt) <= 4:
+                step *= mlt
+                break
+        f = font("barlowm", 24)
+        yb = self.Y(1000)
+        v = math.ceil(self.ymin / step) * step
+        while v < self.ymax:
+            y = self.Y(v)
+            if CY0 + 10 < y < CY1 - 14:
+                d.line([(CX0, y), (CX1, y)], fill=mix(BG2, GRID, 0.9), width=1)
+                if abs(y - yb) > 34:
+                    d.text((CX0 + 6, y - 28), short_money(v), font=f, fill=DIM)
+            v += step
+        # $1,000 baseline
+        if CY0 < yb < CY1:
+            for xx in range(CX0, CX1, 26):
+                d.line([(xx, yb), (min(xx + 13, CX1), yb)], fill=(170, 180, 200), width=2)
+            below = s["gain"] and yb + 34 < CY1
+            if x > 0.15 * (self.n - 1):                    # the line itself starts on top of the label
+                d.text((CX0 + 6, yb + 4 if below else yb - 30), "$1,000", font=f, fill=(190, 198, 215))
+        upto = int(x)
+        # ghost S&P line
+        if self.ghost:
+            gp = [(self.X(i), self.Y(self.ghost[i])) for i in range(upto + 1)] + [(self.X(x), self.Y(interp(self.ghost, x)))]
+            if len(gp) >= 2:
+                d.line(gp, fill=SPY_C, width=4, joint="curve")
+                hx, hy = gp[-1]
+                lab = "S&P 500"
+                lw = text_w(d, lab, f)
+                if x > 0.12 * (self.n - 1):
+                    d.text((min(hx + 10, CX1 - lw), hy + 8), lab, font=f, fill=SPY_C)
+        # main line(s): fill, glow, line, head
+        for line, col in zip(s["lines"], s["colors"]):
+            pts = [(self.X(i), self.Y(line[i])) for i in range(upto + 1)] + [(self.X(x), self.Y(interp(line, x)))]
+            if len(pts) < 2:
+                continue
+            if len(s["lines"]) == 1:
+                rgb, alpha = self.grad(col)
+                mask = Image.new("L", alpha.size, 0)
+                md = ImageDraw.Draw(mask)
+                md.polygon([(px - CX0, py - CY0) for px, py in pts] + [(pts[-1][0] - CX0, CY1 - CY0),
+                                                                       (0, CY1 - CY0)], fill=255)
+                img.paste(rgb, (CX0, CY0), ImageChops.multiply(alpha, mask))
+            gw, gh = (CX1 - CX0 + 60) // 2, (CY1 - CY0 + 60) // 2
+            glow = Image.new("L", (gw, gh), 0)
+            ImageDraw.Draw(glow).line([((px - CX0 + 30) / 2, (py - CY0 + 30) / 2) for px, py in pts],
+                                      fill=200, width=9, joint="curve")
+            glow = glow.filter(ImageFilter.GaussianBlur(7)).resize((gw * 2, gh * 2), Image.BILINEAR)
+            img.paste(Image.new("RGB", glow.size, col), (CX0 - 30, CY0 - 30), glow)
+            d.line(pts, fill=col, width=8, joint="curve")
+            d.line(pts, fill=mix(col, WHITE, 0.55), width=2, joint="curve")
+            hx, hy = pts[-1]
+            ph = (t * 1.6) % 1.0
+            r = 12 + 22 * ph
+            d.ellipse([hx - r, hy - r, hx + r, hy + r], outline=mix(col, BG1, ph), width=3)
+            d.ellipse([hx - 11, hy - 11, hx + 11, hy + 11], fill=WHITE, outline=col, width=4)
+        # event markers + callouts
+        for e, et in zip(self.events, self.tm["event_times"]):
+            if t < et["t"]:
+                continue
+            line = s["lines"][0] if s["series"] != "battle" else s["lines"][0 if e["leader"] == s["tickers"][0] else 1]
+            ex, ey = self.X(e["i"]), self.Y(line[e["i"]])
+            d.ellipse([ex - 8, ey - 8, ex + 8, ey + 8], fill=e["color"], outline=WHITE, width=2)
+            age = t - et["t"]
+            if s["series"] == "battle":                 # the callout only while that side really leads
+                cur = [interp(ln, x) for ln in s["lines"]]
+                if (cur[0] >= cur[1]) != (e["leader"] == s["tickers"][0]):
+                    age = 99
+            if age < 2.3:
+                pop = 1 + 0.25 * (1 - ease_out(age / 0.18))
+                fz = int(44 * pop)
+                txt = e["label"] if s["series"] != "battle" else \
+                    f"{screen_name(e['leader']) if len(screen_name(e['leader'])) <= 10 else e['leader']} {e['label']}"
+                fe = font("anton", fz)
+                w = text_w(d, txt, fe) + 36
+                bx = min(max(CX0, ex - w / 2), CX1 - w)
+                below = e["kind"] in ("drawdown", "half", "bottom")
+                by = ey + 22 if below else ey - fz - 40
+                by = min(max(CY0 - 10, by), CY1 - fz - 30)
+                d.rounded_rectangle([bx, by, bx + w, by + fz + 18], radius=14, fill=e["color"])
+                d.text((bx + 18, by + 4), txt, font=fe, fill=(10, 10, 10) if e["color"] in (GOLD, CYAN, ORANGE)
+                       else WHITE)
+
+    def draw_shock(self, img, d, t):
+        s = self.s
+        sym = s["tickers"][0]
+        tile = self.tiles[sym]
+        img.paste(tile, (70, ROW_Y - 8), tile)
+        box = pill(d, 160, ROW_Y + 4, sym, font("barlow", 36), WHITE, (36, 56, 98), pad=(14, 4))
+        d.text((box[2] + 16, ROW_Y + 10), "MARKET VALUE · ONE DAY", font=font("barlow", 36), fill=MUTED)
+        tc = self.tm["t_count"]
+        v = s["delta"] * shock_value(t, tc)
+        col = RED if v < 0 else GREEN
+        txt = ("–" if v < 0 else "+") + short_money(abs(v))
+        d.text((70, COUNTER_Y - 10), txt, font=font("anton", 190), fill=col, stroke_width=2, stroke_fill=(0, 0, 0))
+        box = pill(d, 70, CHIP_Y + 18, f"{'–' if s['pct'] < 0 else '+'}{abs(s['pct']):.1f}% TODAY",
+                   font("anton", 46), WHITE, col, pad=(18, 4))
+        pill(d, box[2] + 14, CHIP_Y + 18, money2(s["price"]), font("anton", 46), WHITE, CARD, pad=(18, 4),
+             outline=(46, 66, 104))
+        st = self.tm["starts"]
+        tcmp = st.get("compare")
+        if s.get("comp") and tcmp is not None and t >= tcmp:
+            k = ease_out((t - tcmp) / 0.7)
+            a, b = abs(s["delta"]), s["comp"]["mcap"]
+            mx = max(a, b)
+            rows = [(f"{sym} {'LOST' if s['delta'] < 0 else 'ADDED'} TODAY", a, col),
+                    (f"ALL OF {name_of(s['comp']['sym']).upper()}", b, BLUE)]
+            for j, (lab, val, c) in enumerate(rows):
+                y = 880 + j * 138
+                d.text((70, y), lab, font=font("barlow", 36), fill=WHITE)
+                wbar = int(640 * (val / mx) * k)
+                d.rounded_rectangle([70, y + 46, 70 + max(wbar, 8), y + 104], radius=12, fill=c)
+                d.text((70 + max(wbar, 8) + 14, y + 44), short_money(val), font=font("anton", 52), fill=WHITE)
+        tp = st.get("person")
+        if tp is not None and t >= tp:
+            pop = 1 + 0.2 * (1 - ease_out((t - tp) / 0.2))
+            pill(d, 70, 1166, f"≈ {money(abs(s['delta']) / US_POP)} PER AMERICAN", font("anton", int(50 * pop)),
+                 (10, 10, 10), GOLD, pad=(22, 6))
+
+    def draw_captions(self, d, t):
+        for c in self.caps:
+            if c["t0"] <= t < c["t1"]:
+                words = [w[0].upper() for w in c["words"]]
+                size = 84
+                while text_w(d, " ".join(words), font("anton", size), 7) > CAP_W and size > 52:
+                    size -= 4
+                fc = font("anton", size)
+                pop = t - c["t0"] < 0.08
+                if pop:
+                    fc = font("anton", size + 6)
+                total = text_w(d, " ".join(words), fc, 7)
+                x = CAP_X - total / 2
+                bb = d.textbbox((0, 0), "HG0$", font=fc)
+                y = CAP_Y - (bb[1] + bb[3]) / 2
+                for k, w in enumerate(c["words"]):
+                    nxt = c["words"][k + 1][1] if k + 1 < len(c["words"]) else c["t1"]
+                    active = w[1] <= t < nxt
+                    txt = words[k]
+                    d.text((x, y), txt, font=fc, fill=GOLD if active else WHITE, stroke_width=7, stroke_fill=(0, 0, 0))
+                    x += text_w(d, txt + " ", fc, 0)
+                break
+
+    def draw_cta(self, d, t):
+        tc = self.tm["voice_end"] + 0.35
+        if t < tc:
+            return
+        pop = 1 + 0.18 * (1 - ease_out((t - tc) / 0.25))
+        f = font("anton", int(60 * pop))
+        asc, desc = f.getmetrics()
+        box = pill(d, CAP_X, CAP_Y - (asc + desc + 16) / 2, "COMMENT A STOCK", f, WHITE, BLUE, pad=(30, 8),
+                   anchor="c")
+        ax = (box[0] + box[2]) / 2
+        ay = box[3] + 14
+        d.polygon([(ax - 26, ay), (ax + 26, ay), (ax, ay + 28)], fill=BLUE)
+
+    def effects(self, img, t):
+        tr = self.tm.get("t_reveal")
+        if not tr or t < tr:
+            return img
+        age = t - tr
+        if age < 0.3:
+            img = Image.blend(img, Image.new("RGB", img.size, WHITE), 0.45 * (1 - age / 0.3))
+        if self.s["gain"] and age < 2.4 and self.kind != "shock":
+            d = ImageDraw.Draw(img)
+            g = 1500
+            for x0, y0, vx, vy, c, sz in self.parts:
+                px, py = x0 + vx * age, y0 + vy * age + 0.5 * g * age * age
+                if 0 < py < HT:
+                    d.rectangle([px, py, px + sz, py + sz * 0.6], fill=c)
+        if not self.s["gain"] and age < 0.45:
+            dx = int(10 * math.sin(age * 90) * (1 - age / 0.45))
+            img = ImageChops.offset(img, dx, 0)
+        return img
+
+
+def render_video(story, script, timing, audio, out):
+    scene = Scene(story, script, timing)
+    T = timing["T"]
+    nfr = int(T * FPS)
+    cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{WD}x{HT}", "-r", str(FPS),
+           "-i", "-", "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast",
+           "-crf", "19", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags",
+           "+faststart", str(out)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    t0 = time.time()
+    for k in range(nfr):
+        proc.stdin.write(scene.frame(k / FPS).tobytes())
+    proc.stdin.close()
+    if proc.wait() != 0:
+        raise SystemExit("ffmpeg failed")
+    print(f"render: {nfr} frames in {time.time() - t0:.1f}s -> {out}")
+    return scene
+
+
+# =========================================================================================================
+# YouTube
+# =========================================================================================================
 def youtube():
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
@@ -399,832 +2164,144 @@ def youtube():
         client_id=os.environ["YT_CLIENT_ID"], client_secret=os.environ["YT_CLIENT_SECRET"]))
 
 
-def translate(title, question, story):
-    """Localized title/description so YouTube shows them in the viewer's language."""
+def description(story, script):
+    f, s = story["facts"], story["series"]
+    q = script.get("question", "")
+    body = "\n".join(script["lines"])
+    if s == "shock":
+        how = (f"How we calculated it: change in market value = shares outstanding × today's price change "
+               f"({f['date']}). Data: Finnhub. Per-American figure uses a US population of about 340 million.")
+        tags = f"#shorts #stocks #stockmarket #{story['tickers'][0].replace('-', '')}"
+    else:
+        names = " vs ".join(f"{n} ({t})" for n, t in zip(story["names"], story["tickers"]))
+        how = (f"How we calculated it: a hypothetical $1,000 invested at the {f['start']} monthly close in "
+               f"{names}, held to {f['as_of']}, "
+               + ("dividends reinvested (adjusted prices)" if story["div"] else "price only, dividends not included")
+               + f". No fees or taxes. Data: {story['src']}" + (", Finnhub" if env("FINNHUB_API_KEY") else "")
+               + (". Benchmark: SPDR S&P 500 ETF (SPY)." if story.get("ghost") else "."))
+        tags = "#shorts #stocks #investing " + " ".join("#" + t.replace("-", "") for t in story["tickers"])
+    return (f"{q} 👇\n\n{body}\n\n{how}\nHypothetical illustration. Past performance does not guarantee future "
+            f"results. Not financial advice.\n\n{tags}")[:4900]
+
+
+def translate(title, question, story_text):
     if not LANGS:
         return {}
-    try:
-        tr = gemini(
-            f"Translate this YouTube Short metadata about the US stock market into these languages: {', '.join(LANGS)} "
-            "(ISO 639-1 codes). Natural, catchy wording for each language, keep company names, tickers, numbers and dates exact, "
-            f"title max 80 characters, no hashtags.\nTITLE: {title}\nQUESTION: {question}\nSTORY:\n{story}\n"
-            'Return JSON: {"<code>": {"title": "...", "question": "...", "story": "..."}, ...}',
-            lambda d: isinstance(d, dict) and sum(isinstance(d.get(l), dict) and bool(d[l].get("title"))
-                                                  for l in LANGS) >= len(LANGS) // 2, rounds=2)
-    except SystemExit:
-        print("translation skipped")
-        return {}
-    return {l: v for l, v in tr.items() if l in LANGS and isinstance(v, dict) and v.get("title")}
-
-
-def add_to_playlist(yt, vid):
-    try:
-        items = yt.playlists().list(part="snippet", mine=True, maxResults=50).execute().get("items", [])
-        pl = next((i["id"] for i in items if i["snippet"]["title"] == PLAYLIST), None) or \
-            yt.playlists().insert(part="snippet,status", body={
-                "snippet": {"title": PLAYLIST, "description": f"{PLAYLIST}: stock market Shorts."},
-                "status": {"privacyStatus": "public"}}).execute()["id"]
-        yt.playlistItems().insert(part="snippet", body={"snippet": {
-            "playlistId": pl, "resourceId": {"kind": "youtube#video", "videoId": vid}}}).execute()
-        print("playlist:", PLAYLIST)
-    except Exception as e:
-        print("playlist skipped (re-run auth.py with new scopes):", str(e)[:200])
-
-
-def post_comment(yt, vid, data):
-    q = plain(data.get("question", ""))
-    try:
-        if q:
-            yt.commentThreads().insert(part="snippet", body={"snippet": {"videoId": vid, "topLevelComment": {
-                "snippet": {"textOriginal": f"{q} 👇"}}}}).execute()
-            print("comment posted")
-    except Exception as e:
-        print("comment skipped (re-run auth.py with new scopes):", str(e)[:200])
-
-
-def set_category(c):
-    global CATEGORY, LABEL, ACCENT, PLAYLIST, STORY, CAT_TAGS, ACC_ASS, ACC_RGB
-    CATEGORY = c
-    LABEL, ACCENT, PLAYLIST, STORY, CAT_TAGS = CATEGORIES[c]
-    ACCENT = "0x%02X%02X%02X" % THEME["acc"]
-    ACC_ASS = f"&H00{ACCENT[6:8]}{ACCENT[4:6]}{ACCENT[2:4]}&"
-    ACC_RGB = tuple(int(ACCENT[k:k + 2], 16) for k in (2, 4, 6))
-
-
-# ---- Market data (Finnhub, free key) -------------------------------------------
-def fh(path, **params):
-    """One Finnhub call; paced under the free limit (60/min). None if unavailable."""
-    for _ in range(4):
-        try:
-            r = requests.get(f"{FINNHUB}/{path}", params={**params, "token": os.environ["FINNHUB_API_KEY"]},
-                             timeout=30)
-            time.sleep(1.05)
-            if r.status_code == 429:
-                time.sleep(20)
-                continue
-            if r.status_code in (401, 403):
-                print(path, r.status_code, "(not available on this plan)")
-                return None
-            r.raise_for_status()
-            return r.json()
-        except (requests.RequestException, ValueError) as e:
-            print(path, "error:", type(e).__name__)
-            time.sleep(5)
-    return None
-
-
-def company_news(t, days=3, k=3):
-    """Latest headlines + short summaries for one ticker, as raw facts for the 'why' line."""
-    news = fh("company-news", symbol=t, **{"from": str(US_DATE - dt.timedelta(days=days)), "to": str(US_DATE)}) or []
-    out = [f"{n['headline']} ({str(n.get('summary', ''))[:220]})" for n in news[:k] if n.get("headline")]
-    return " | ".join(out) or "none"
-
-
-def tickers(sector):
-    return [t for t, (_, s) in UNIVERSE.items() if sector == "All" or s == sector]
-
-
-def pct(x):
-    return f"{x:+.1f}%"
-
-
-def money(x):
-    return f"${x:,.2f}"
-
-
-QUOTES = {}
-
-
-def quote(t):
-    """Latest quote, cached per run so every slide shows the same number."""
-    if t not in QUOTES:
-        q = fh("quote", symbol=t) or {}
-        QUOTES[t] = q if q.get("c") and q.get("dp") is not None else None
-    return QUOTES[t]
-
-
-def metrics(sector):
-    out = {}
-    for t in tickers(sector):
-        m = (fh("stock/metric", symbol=t, metric="all") or {}).get("metric") or {}
-        if m:
-            out[t] = m
-    return out
-
-
-def pick_sector(cat, period):
-    """First sector (rotating) not yet covered by this category in this period."""
-    start = sum(1 for u in used if u.startswith(cat))
-    for k in range(len(SECTORS)):
-        s = SECTORS[(start + k) % len(SECTORS)]
-        if f"{cat} {s} {period}" not in used:
-            return s
-    return SECTORS[start % len(SECTORS)]
-
-
-def data_movers():
-    qs = {t: quote(t) for t in UNIVERSE}
-    qs = {t: q for t, q in qs.items() if q}
-    if len(qs) < 20 or max(abs(q["dp"]) for q in qs.values()) < 0.3:   # weekend / holiday / no data
-        return None
-    ranked = sorted(qs, key=lambda t: qs[t]["dp"])
-    avg = sum(q["dp"] for q in qs.values()) / len(qs)                    # the whole basket decides the story
-    global DAY_WORD
-    DAY_WORD = "GAINERS" if avg >= 0 else "TANKERS"                       # shown above the 4 stock cards
-    pick = ranked[::-1][:4] if avg >= 0 else ranked[:4]                   # top 4 gainers (or losers)
-    items = []
-    for t in pick:
-        heads = company_news(t, days=2)
-        q = qs[t]
-        items.append({"ticker": t, "name": UNIVERSE[t][0], "main": money(q["c"]),
-                      "badge": (pct(q["dp"]), UP if q["dp"] >= 0 else DOWN),
-                      "rows": [("Day range", f"{money(q['l'])} - {money(q['h'])}"), ("Previous close", money(q["pc"]))],
-                      "bar": q["dp"], "bar_txt": pct(q["dp"]),
-                      "fact": f"{t} ({UNIVERSE[t][0]}): closed at {money(q['c'])}, {pct(q['dp'])} today. "
-                              f"Recent news: {heads}"})
-    mood = "positive" if avg >= 0.4 else "negative" if avg <= -0.4 else "neutral"
-    tech = [{"ticker": t, "bar": qs[t]["dp"], "bar_txt": pct(qs[t]["dp"])} for t in TOP_TECH if t in qs]
-    spy = quote("SPY")
-    bench = f"S&P 500 (SPY) was {pct(spy['dp'])} today" if spy else US_DATE.strftime("%b %d, %Y")
-    extra = "Top tech stocks today: " + ", ".join(f"{x['ticker']} {x['bar_txt']}" for x in tech) + \
-        (f". S&P 500 (SPY) {pct(spy['dp'])} today" if spy else "")
-    return {"items": items, "key": f"movers {US_DATE}", "sub": US_DATE.strftime("%b %d, %Y"),
-            "board": "Top tech stocks today", "board_items": tech, "board_sub": bench, "extra": extra,
-            "mood": mood}
-
-
-def data_news():
-    raw = fh("news", category="general") or []
-    cut = NOW.timestamp() - 30 * 3600
-    stories = [n for n in raw if n.get("datetime", 0) >= cut and n.get("headline")][:15]
-    if len(stories) < 3:
-        return None
-    listing = "\n".join(f"{i}. {n['headline']} — {str(n.get('summary', ''))[:300]}" for i, n in enumerate(stories))
-    pick = gemini(
-        "From these stock market news items pick the 3 that matter most to everyday investors today. For each give "
-        "a neutral title of max 6 words in your own words and 0-2 US stock tickers it is about.\n" + listing +
-        "\nAlso judge the overall mood of these stories for investors: positive, negative or neutral."
-        '\nReturn JSON: {"mood": "positive", "stories": [{"index": 0, "title": "...", "tickers": ["AAPL"]}]}',
-        lambda d: isinstance(d, dict) and len(d.get("stories", [])) >= 3)
-    mood = str(pick.get("mood", "neutral")).lower()
-    items = []
-    for s in pick["stories"][:3]:
-        n = stories[int(s.get("index", 0)) % len(stories)]
-        chips, facts = [], []
-        for t in [str(x).upper() for x in s.get("tickers", [])][:2]:
-            q = quote(t) if re.fullmatch(r"[A-Z.]{1,6}", t) else None
-            if q:
-                chips.append((t, pct(q["dp"]), UP if q["dp"] >= 0 else DOWN))
-                facts.append(f"{t} {pct(q['dp'])} today")
-        items.append({"ticker": f"STORY {len(items) + 1}", "name": str(s.get("title", ""))[:60], "chips": chips,
-                      "bar": None,
-                      "fact": f"{n['headline']} — {str(n.get('summary', ''))[:400]} ({n.get('source', '')}). "
-                              f"{'; '.join(facts)}"})
-    return {"items": items, "key": f"news {US_DATE}", "sub": US_DATE.strftime("%b %d, %Y"), "board": None,
-            "mood": mood if mood in MOODS else "neutral"}
-
-
-def data_pe():
-    sector = pick_sector("pe", US_DATE.strftime("%Y-%m"))
-    ms = metrics(sector)
-    pes = {t: m.get("peTTM") or m.get("peBasicExclExtraTTM") for t, m in ms.items()}
-    pes = {t: p for t, p in pes.items() if p and 0 < p < 300}
-    if len(pes) < 4:
-        return None
-    items = []
-    for t in sorted(pes, key=pes.get)[:4]:
-        m = ms[t]
-        ret, gr, dy = m.get("52WeekPriceReturnDaily"), m.get("revenueGrowthTTMYoy"), m.get("currentDividendYieldTTM")
-        rows = [(k, v) for k, v in (("1-year return", pct(ret) if ret is not None else None),
-                                    ("Revenue growth", pct(gr) if gr is not None else None),
-                                    ("Dividend yield", f"{dy:.1f}%" if dy else None)) if v]
-        items.append({"ticker": t, "name": UNIVERSE[t][0], "main": f"P/E {pes[t]:.1f}", "rows": rows,
-                      "bar": pes[t], "bar_txt": f"{pes[t]:.1f}",
-                      "fact": f"{t} ({UNIVERSE[t][0]}, {UNIVERSE[t][1]}): P/E {pes[t]:.1f}; "
-                              + "; ".join(f"{k} {v}" for k, v in rows) + f". Recent news: {company_news(t, days=14, k=2)}"})
-    return {"items": items, "key": f"pe {sector} {US_DATE:%Y-%m}", "sub": f"Sector: {sector}", "board": "P/E ratio"}
-
-
-def data_month():
-    sector = pick_sector("month", US_DATE.strftime("%Y-%m"))
-    first = US_DATE.replace(day=1)
-    last = (first + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
-    cal = (fh("calendar/earnings", **{"from": str(US_DATE), "to": str(last)}) or {}).get("earningsCalendar", [])
-    earn = {e["symbol"]: e["date"] for e in cal if e.get("symbol") in UNIVERSE}
-    score = {}
-    for t in tickers(sector):
-        rec = fh("stock/recommendation", symbol=t) or []
-        if rec:
-            r = rec[0]
-            total = sum(r.get(k, 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell"))
-            if total >= 10:
-                score[t] = (round(100 * (r.get("strongBuy", 0) + r.get("buy", 0)) / total), total, r)
-    if len(score) < 4:
-        return None
-    items = []
-    for t in sorted(score, key=lambda t: (score[t][0], score[t][1]), reverse=True)[:4]:
-        share, total, r = score[t]
-        when = dt.date.fromisoformat(earn[t]).strftime("%b %d") if t in earn else "not this month"
-        items.append({"ticker": t, "name": UNIVERSE[t][0], "main": f"{share}% Buy",
-                      "rows": [("Analysts", str(total)), ("Strong buy", str(r.get("strongBuy", 0))),
-                               ("Earnings", when)],
-                      "bar": share, "bar_txt": f"{share}%",
-                      "fact": f"{t} ({UNIVERSE[t][0]}): {share}% of {total} analysts rate it Buy or Strong Buy "
-                              f"({r.get('strongBuy', 0)} Strong Buy); next earnings: {when}" + f". Recent news: {company_news(t, days=14, k=2)}"})
-    return {"items": items, "key": f"month {sector} {US_DATE:%Y-%m}", "sub": f"{US_DATE:%B %Y} · {sector}",
-            "board": "Analysts rating Buy"}
-
-
-def data_y2030():
-    sector = pick_sector("y2030", US_DATE.strftime("%Y-%m"))
-    ms = metrics(sector)
-    g = {t: m.get("revenueGrowth5Y") for t, m in ms.items()}
-    g = {t: v for t, v in g.items() if v is not None and -50 < v < 300}
-    if len(g) < 4:
-        return None
-    years = max(1, 2030 - US_DATE.year)
-    items = []
-    for t in sorted(g, key=g.get, reverse=True)[:4]:
-        mult = (1 + g[t] / 100) ** years
-        eps = ms[t].get("epsGrowth5Y")
-        rows = [("5-yr revenue growth", f"{g[t]:+.1f}%/yr")] + ([("5-yr EPS growth", f"{eps:+.1f}%/yr")] if eps else []) \
-            + [(f"Same pace to 2030", f"x{mult:.1f} revenue")]
-        items.append({"ticker": t, "name": UNIVERSE[t][0], "main": f"{g[t]:+.1f}%/yr", "rows": rows,
-                      "bar": g[t], "bar_txt": f"{g[t]:+.1f}%",
-                      "fact": f"{t} ({UNIVERSE[t][0]}): revenue grew {g[t]:.1f}% per year over 5 years"
-                              + (f", EPS {eps:.1f}% per year" if eps else "")
-                              + f"; if that pace continued for {years} more years revenue would be x{mult:.1f} by 2030 "
-                                "(hypothetical, not a forecast)" + f". Recent news: {company_news(t, days=14, k=2)}"})
-    return {"items": items, "key": f"y2030 {sector} {US_DATE:%Y-%m}", "sub": f"Sector: {sector}",
-            "board": "5-year revenue growth per year"}
-
-
-DATA = {"movers": data_movers, "news": data_news, "pe": data_pe, "month": data_month, "y2030": data_y2030}
-
-
-def get_data():
-    order = [CATEGORY] + [c for c in ("pe", "month", "y2030") if c != CATEGORY]
-    for c in order:
-        set_category(c)
-        d = DATA[c]()
-        if d and d["key"] not in used:
-            return d
-        print("no data for", c)
-    raise SystemExit("No market data available")
-
-
-# ---- Script --------------------------------------------------------------------
-def numbers_ok(lines, facts):
-    """Every number spoken must come from the data (years and small counts allowed)."""
-    known = [float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*\.?\d*", facts)]
-    for l in lines:
-        for x in re.findall(r"\d[\d,]*\.?\d*", plain(l)):
-            v = float(x.replace(",", "").rstrip("."))
-            if v <= 10 or 2000 <= v <= 2040 or any(abs(v - k) <= 0.06 for k in known):
-                continue
-            print("number not in data:", x, "|", plain(l))
-            return False
-    return True
-
-
-def gen_script(d):
-    n = len(d["items"])
-    facts = "\n".join(f"ITEM {i + 1}: {it['fact']}" for i, it in enumerate(d["items"])) + \
-        (f"\nMARKET CONTEXT (for the last line only): {d['extra']}" if d.get("extra") else "")
-    rules = {
-        "pe": "- One line must say a low P/E can mean the market expects trouble (a value trap).\n",
-        "y2030": "- Say clearly the 2030 numbers are 'if this pace continued', never a prediction.\n",
-        "month": "- Present it as analysts' opinion, which can be wrong.\n",
-    }.get(CATEGORY, "")
-    prompt = (
-        "You write a 20-30 second YouTube Short about the US stock market for beginners, voiced by a calm, "
-        f"confident narrator. Topic: {STORY} ({d['sub']}).\nFACTS (the ONLY source; copy numbers exactly as written, "
-        f"never invent or round differently):\n{facts}\nRules:\n"
-        "- headline: the hook, max 7 words, spoken first and shown the whole time; a number or a contradiction; "
-        "must not reveal the final takeaway. Never start with 'Did you know'.\n"
-        f"- lines: exactly {n + 1} narration lines, max 12 words each. Line k (1..{n}) is about ITEM k, in order. "
-        "Line k may use ONLY ITEM k's own facts and recent news, never another item's news; every stock has its "
-        "own reason, so all item lines must be different. "
-        "The screen already shows the ticker, company name, price and its % move, so a line must NOT repeat them "
-        "and must NOT say 'moved' or 'on the news'. Instead state the concrete CAUSE or driver from that item's "
-        "facts and recent news, short and specific, with a number if the facts have one (style example: "
-        "'New Apple subscriptions deal; $5.5B free cash flow'). If the facts give no clear cause, say it honestly "
-        "(e.g. 'No company news; the whole sector fell'). Never invent a cause. "
-        f"Line {n + 1} is the single most important takeaway or risk.\n"
-        "- NEVER tell viewers to buy, sell or hold anything, and never give your own price predictions. "
-        "Do not copy news sentences; say it in your own words.\n" + rules +
-        "- Write every change or growth number with its sign (+5.8%, -2.1%, +44.6%/yr); other numbers without a sign.\n"
-        "- In headline and each line wrap the most important number or name in [r]...[/r] and at most one other "
-        "detail in [y]...[/y].\n"
-        "- question: one short question to viewers that invites comments (max 10 words, no markers).\n"
-        "- title: up to 70 characters with a number, honest, no markers.\n"
-        'Return JSON: {"title": "...", "headline": "...", "lines": ["..."], "question": "...", "tags": ["5-8 tags"]}')
-    ok = lambda x: isinstance(x, dict) and x.get("headline") and len(x.get("lines", [])) == n + 1
-    def distinct(lines):
-        """No two stock lines may share most of their words (each stock needs its own cause)."""
-        sets = [set(re.findall(r"[a-z]{4,}", plain(l).lower())) for l in lines[:n]]
-        for a in range(len(sets)):
-            for b in range(a + 1, len(sets)):
-                if sets[a] and len(sets[a] & sets[b]) / len(sets[a] | sets[b]) > 0.5:
-                    print("lines too similar:", lines[a], "|", lines[b])
-                    return False
-        return True
-
-    for _ in range(3):
-        data = gemini(prompt, ok)
-        if numbers_ok([data["headline"]] + data["lines"], facts) and distinct(data["lines"]):
-            return data
-    raise SystemExit("Script kept using numbers that are not in the data")
-
-
-# ---- Slides (drawn with Pillow) ------------------------------------------------
-def font(size, bold=True):
-    from PIL import ImageFont
-    for p in ([str(FONT)] if FONT.exists() else []) + [
-            f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'-Bold' if bold else ''}.ttf"]:
-        try:
-            return ImageFont.truetype(p, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def canvas():
-    from PIL import Image, ImageDraw
-    im = Image.new("RGB", (1080, MID_H), BG)
-    d = ImageDraw.Draw(im)
-    d.rectangle([70, 52, 130, 58], fill=ACC_RGB)       # short blue rule, top left
-    return im, d
-
-
-def tone(v):
-    """Green for a positive change, red for a negative one, white for everything else."""
-    v = str(v).strip()
-    return UP if v.startswith("+") else DOWN if v.startswith(("-", "−")) and re.match(r"[-−]\$?\d", v) else INK
-
-
-def wrap(d, text, f, width):
-    words, lines, cur = str(text).split(), [], ""
-    for w in words:
-        t = (cur + " " + w).strip()
-        if d.textlength(t, font=f) <= width:
-            cur = t
-        else:
-            lines.append(cur)
-            cur = w
-    return lines + ([cur] if cur else [])
-
-
-def slide_title(d0, path):
-    im, d = canvas()
-    y = 230
-    for line in wrap(d, LABEL, font(84), 900):
-        d.text((70, y), line, font=font(84), fill=INK)
-        y += 100
-    d.text((70, y + 20), d0["sub"], font=font(44, False), fill=ACC_RGB)
-    d.text((70, MID_H - 90), "Data: Finnhub  ·  Not financial advice", font=font(28, False), fill=MUTED)
-    im.save(path)
-
-
-LOGOS = {}
-
-
-def logo_for(t):
-    """Company logo from the Finnhub company profile (as provided by the data feed); None if unavailable."""
-    if t in LOGOS:
-        return LOGOS[t]
-    LOGOS[t] = None
-    if re.fullmatch(r"[A-Z.]{1,6}", t):
-        url = (fh("stock/profile2", symbol=t) or {}).get("logo")
-        if url:
-            try:
-                r = requests.get(url, timeout=30)
-                r.raise_for_status()
-                p = W / f"logo_{t}.img"
-                p.write_bytes(r.content)
-                from PIL import Image
-                Image.open(p).verify()
-                LOGOS[t] = p
-            except Exception as e:
-                print("logo skipped:", t, type(e).__name__)
-    return LOGOS[t]
-
-
-def logo_badge(t, height):
-    """Logo on a white rounded badge (readable on black), sized to the logo's shape; None if no logo."""
-    from PIL import Image, ImageDraw
-    p = logo_for(t)
-    if not p:
-        return None
-    try:
-        lg = Image.open(p).convert("RGBA")
-    except Exception:
-        return None
-    pad = int(height * .14)
-    lg.thumbnail((int(height * 3.2), height - 2 * pad), Image.LANCZOS)
-    badge = Image.new("RGBA", (lg.width + 2 * pad, height), (0, 0, 0, 0))
-    ImageDraw.Draw(badge).rounded_rectangle([0, 0, badge.width - 1, height - 1], radius=height // 5,
-                                            fill=(255, 255, 255, 255), outline=LINE + (255,), width=2)
-    badge.alpha_composite(lg, (pad, (height - lg.height) // 2))
-    return badge
-
-
-def slide_card(it, i, n, path):
-    im, d = canvas()
-    d.text((145, 36), f"{i}/{n}", font=font(30, False), fill=MUTED)       # next to the blue rule
-    d.text((70, 120), it["ticker"], font=font(120), fill=INK)
-    badge = logo_badge(it["ticker"], 120) if re.fullmatch(r"[A-Z.]{1,6}", it["ticker"]) else None
-    if badge:                                                                # company logo, top right
-        im.paste(badge, (1010 - badge.width, 130), badge)
-    y = 270
-    for line in wrap(d, str(it["name"]).upper(), font(48, False), 920 if not badge else 1010 - badge.width - 110)[:2]:
-        d.text((74, y), line, font=font(48, False), fill=MUTED if it.get("main") else INK)
-        y += 60
-    if it.get("main"):
-        d.text((70, y + 30), it["main"], font=font(96), fill=tone(it["main"]))
-        if it.get("badge"):
-            txt, col = it["badge"]
-            x0 = 70 + d.textlength(it["main"], font=font(96)) + 30
-            arrow = "▲ " if col == UP else "▼ "
-            d.text((x0, y + 52), arrow + txt, font=font(56), fill=col)
-        y += 160
-    for t, v, col in it.get("chips", []):              # news: tickers it moved
-        d.text((74, y + 30), t, font=font(52), fill=INK)
-        d.text((74 + d.textlength(t + "  ", font=font(52)), y + 30), ("▲ " if col == UP else "▼ ") + v,
-               font=font(52), fill=col)
-        y += 110
-    for k, v in it.get("rows", []):
-        d.text((74, y + 10), k.upper(), font=font(34, False), fill=MUTED)
-        d.text((1010 - d.textlength(v, font=font(40)), y + 6), v, font=font(40), fill=tone(v))
-        d.line([(74, y + 62), (1010, y + 62)], fill=LINE, width=2)
-        y += 72
-    im.save(path)
-
-
-BAR_UP, BAR_DOWN, BAR_BLUE = THEME["bar_up"], THEME["bar_down"], THEME["bar_blue"]   # softer chart colours
-
-
-def slide_board(d0, path):
-    """Ranking like a classic bar infographic: centered title, bars from the left, bold value inside the
-    bar's end, company logo (or ticker) right after the bar. Black background."""
-    from PIL import Image, ImageDraw
-    im = Image.new("RGB", (1080, MID_H), BG)
-    d = ImageDraw.Draw(im)
-    title, size = d0["board"].upper(), 54
-    while d.textlength(title, font=font(size)) > 980 and size > 32:
-        size -= 2
-    d.text(((1080 - d.textlength(title, font=font(size))) / 2, 72), title, font=font(size), fill=INK)   # below the brand
-    sub = str(d0.get("board_sub") or d0.get("sub", "")).upper()
-    d.text(((1080 - d.textlength(sub, font=font(30, False))) / 2, 142), sub, font=font(30, False), fill=THEME["sub"])
-    items = sorted(d0.get("board_items") or d0["items"], key=lambda it: it["bar"],
-                   reverse=CATEGORY != "pe")                                   # P/E: cheapest on top
-    vmax = max(abs(it["bar"]) for it in items) or 1
-    x0, tag_w = 30, 290
-    span = 1050 - x0 - tag_w
-    top = 205
-    gap = (MID_H - top - 20) // max(1, len(items))
-    bh = min(120, int(gap * .8))
-    vf = font(int(min(bh * .55, 52)))
-    for k, it in enumerate(items):
-        y = top + k * gap
-        col = (BAR_UP if it["bar"] >= 0 else BAR_DOWN) if CATEGORY in ("movers", "y2030") else BAR_BLUE
-        txt = it["bar_txt"]
-        w = max(int(span * abs(it["bar"]) / vmax), int(d.textlength(txt, font=vf)) + 50)
-        d.rounded_rectangle([x0, y, x0 + w, y + bh], radius=6, fill=col)
-        d.text((x0 + w - 22 - d.textlength(txt, font=vf), y + (bh - vf.size) / 2 - 3), txt, font=vf, fill=(0, 0, 0))
-        badge = logo_badge(it["ticker"], int(bh * .78)) if re.fullmatch(r"[A-Z.]{1,6}", it["ticker"]) else None
-        if badge:
-            im.paste(badge, (x0 + w + 16, y + (bh - badge.height) // 2), badge)
-        else:
-            tf = font(int(min(bh * .55, 52)))
-            d.text((x0 + w + 18, y + (bh - tf.size) / 2 - 3), it["ticker"], font=tf, fill=INK)
-    im.save(path)
-
-
-# ---- Cover (first seconds): illustrated market background + tag + big headline ---------------------------
-COND_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"
-NAVY, NAVY2 = (6, 18, 40), (14, 40, 84)
-
-
-def cond_font(size):
-    from PIL import ImageFont
-    for p in ([str(FONT)] if FONT.exists() else []) + [COND_FONT, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
-        try:
-            return ImageFont.truetype(p, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def cover_background(mood, seed):
-    """Original illustration: night skyline, candlesticks, rising bars and a glowing arrow (down if bad news)."""
-    from PIL import Image, ImageDraw, ImageFilter
-    rnd = random.Random(seed)
-    W_, H_ = 1080, 1920
-    up = mood != "negative"
-    col = COVER_UP if mood == "positive" else COVER_DOWN if mood == "negative" else COVER_BLUE
-    im = Image.new("RGB", (W_, H_), NAVY)
-    d = ImageDraw.Draw(im)
-    for y in range(H_):                                   # night-sky gradient
-        k = y / H_
-        d.line([(0, y), (W_, y)], fill=tuple(int(NAVY2[c] * (1 - k) + NAVY[c] * k) for c in range(3)))
-    for x in range(0, W_, 60):                            # faint data grid
-        d.line([(x, 0), (x, H_)], fill=(20, 48, 92), width=1)
-    for y in range(0, H_, 60):
-        d.line([(0, y), (W_, y)], fill=(20, 48, 92), width=1)
-    # skyline silhouette with lit windows
-    x = -20
-    while x < W_:
-        w, h = rnd.randint(70, 160), rnd.randint(380, 980)
-        top = 1350 - h
-        d.rectangle([x, top, x + w, 1400], fill=(10, 22, 44))
-        for wy in range(top + 20, 1340, 34):
-            for wx in range(x + 12, x + w - 14, 26):
-                if rnd.random() < 0.35:
-                    d.rectangle([wx, wy, wx + 10, wy + 16], fill=(70, 110, 170) if rnd.random() < .8 else (230, 200, 120))
-        x += w + rnd.randint(4, 20)
-    # candlesticks across the sky, trending with the mood
-    glow = Image.new("RGB", (W_, H_), (0, 0, 0))
-    g = ImageDraw.Draw(glow)
-    price = 900 if up else 350
-    for i in range(26):
-        cx = 60 + i * 38
-        step = rnd.uniform(-38, 12) if up else rnd.uniform(-12, 38)
-        o, c = price, price + step
-        green = c < o
-        hi, lo = min(o, c) - rnd.uniform(8, 40), max(o, c) + rnd.uniform(8, 40)
-        cc = COVER_UP if green else COVER_DOWN
-        d.line([(cx, hi), (cx, lo)], fill=cc, width=3)
-        d.rectangle([cx - 11, min(o, c), cx + 11, max(o, c) + 3], fill=cc)
-        g.rectangle([cx - 11, min(o, c), cx + 11, max(o, c) + 3], fill=cc)
-        price = c
-    # rising (or falling) bars at the bottom of the art
-    for i in range(10):
-        bh = (90 + i * 45 if up else 520 - i * 45) + rnd.randint(-20, 20)
-        bx = 560 + i * 50
-        d.rectangle([bx, 1380 - bh, bx + 34, 1380], fill=tuple(int(v * .75) for v in col))
-        g.rectangle([bx, 1380 - bh, bx + 34, 1380], fill=tuple(int(v * .5) for v in col))
-    # big zigzag arrow
-    pts = [(40, 1250), (230, 1080), (330, 1170), (520, 900), (620, 990), (860, 520)] if up else \
-          [(40, 420), (230, 600), (330, 510), (520, 790), (620, 700), (860, 1160)]
-    for layer, wdt in ((g, 70), (d, 34)):
-        layer.line(pts, fill=col, width=wdt, joint="curve")
-    (x1, y1), (x2, y2) = pts[-2], pts[-1]
-    ang = math.atan2(y2 - y1, x2 - x1)
-    tip = (x2 + 70 * math.cos(ang), y2 + 70 * math.sin(ang))
-    head = [tip, (x2 + 60 * math.cos(ang + 2.1), y2 + 60 * math.sin(ang + 2.1)),
-            (x2 + 60 * math.cos(ang - 2.1), y2 + 60 * math.sin(ang - 2.1))]
-    for layer in (g, d):
-        layer.polygon(head, fill=col)
-    glow = glow.filter(ImageFilter.GaussianBlur(28))
-    im = Image.blend(im, Image.composite(glow, im, glow.convert("L")), 1.0)
-    from PIL import ImageChops
-    im = ImageChops.add(im, glow, scale=1.4)
-    return im
-
-
-def make_cover(headline, label, mood, path):
-    """Layout of a news card: art on top, dark fade, coloured tag, big two-colour headline, channel name."""
-    from PIL import Image, ImageDraw
-    col = COVER_UP if mood == "positive" else COVER_DOWN if mood == "negative" else COVER_BLUE
-    im = cover_background(mood, seed=len(headline) * 7 + FILE_NO)
-    shade = Image.new("L", (1080, 1920), 0)                # fade to black over the lower part
-    sd = ImageDraw.Draw(shade)
-    for y in range(1920):
-        sd.line([(0, y), (1080, y)], fill=int(255 * min(1, max(0, (y - 900) / 520)) ** 1.2))
-    im = Image.composite(Image.new("RGB", im.size, (0, 0, 0)), im, shade)
-    d = ImageDraw.Draw(im)
-    d.text((60, 70), CHANNEL, font=font(34), fill=(220, 225, 235))          # small top-left brand
-    # headline: [r]...[/r] part in the mood colour, rest white; auto-size to fit 4 lines
-    parts = re.split(r"(\[r\].*?\[/r\])", caps(headline))
-    words = []
-    for p in parts:
-        hot = p.startswith("[r]")
-        words += [(w, hot) for w in plain(p).split()]
-    if not any(h for _, h in words):                       # nothing marked: colour the first half
-        words = [(w, k < max(1, len(words) // 2)) for k, (w, _) in enumerate(words)]
-    for size in (104, 96, 88, 80, 72):
-        hf = cond_font(size)
-        lines, cur = [], []
-        for w in words:
-            if cur and d.textlength(" ".join(x for x, _ in cur + [w]), font=hf) > 960:
-                lines.append(cur)
-                cur = []
-            cur.append(w)
-        lines.append(cur)
-        if len(lines) <= 4:
-            break
-    line_h = int(size * 1.12)
-    y0 = 1790 - len(lines) * line_h - 110                  # block ends just above the disclaimer
-    # tag: icon box + coloured label
-    tf = cond_font(52)
-    tw = d.textlength(label, font=tf)
-    d.rectangle([60, y0, 132, y0 + 72], outline=col, width=4)
-    for k, hgt in enumerate((18, 32, 46)):
-        d.rectangle([74 + k * 18, y0 + 58 - hgt, 86 + k * 18, y0 + 58], fill=col)
-    d.rectangle([150, y0, 150 + tw + 44, y0 + 72], fill=col)
-    d.text((172, y0 + 6), label, font=tf, fill=(255, 255, 255))
-    y = y0 + 100
-    for line in lines:
-        x = 60
-        for w, hot in line:
-            d.text((x, y), w, font=hf, fill=col if hot else (255, 255, 255))
-            x += d.textlength(w + " ", font=hf)
-        y += line_h
-    d.text((60, 1840), "NOT FINANCIAL ADVICE", font=font(26, False), fill=(120, 125, 135))
-    im.save(path)
-
-
-TAGS = {"movers": "MARKET MOVERS", "news": "STOCK MARKET", "pe": "VALUE STOCKS",
-        "month": "ANALYSTS' PICKS", "y2030": "GROWTH STOCKS"}
-
-
-# ---- Timing, shots, captions ---------------------------------------------------
-def line_times(data, words, total):
-    body = [l for l in data["lines"] if plain(l)]
-    counts = [len(plain(l).split()) for l in body]
-    c = head = len(plain(data["headline"]).split())
-    starts = []
-    for k in counts:
-        if words and len(words) > head + 3:
-            starts.append(words[min(c, len(words) - 1)][1])
-        else:
-            starts.append(0.4 + (total - 0.6) * c / (head + sum(counts)))
-        c += k
-    return list(zip(body, starts, starts[1:] + [total]))
-
-
-def build_slides(d0, timed, total):
-    """Title while the hook is spoken, one card per item line, the comparison board on the last line."""
-    paths = [(W / "s_cover.png").resolve()]
-    make_cover(HEADLINE, TAGS.get(CATEGORY, "STOCK MARKET"), d0.get("mood", "neutral"), paths[0])
-    n = len(d0["items"])
-    for i, it in enumerate(d0["items"], 1):
-        paths.append((W / f"s_{i}.png").resolve())
-        slide_card(it, i, n, paths[-1])
-    last = paths[-1]
-    if d0.get("board") and all(it.get("bar") is not None for it in d0["items"]):
-        last = (W / "s_board.png").resolve()
-        slide_board(d0, last)
-    starts = [0.0] + [s for _, s, _ in timed]
-    shots = []
-    for k in range(len(starts)):
-        end = starts[k + 1] if k + 1 < len(starts) else total
-        img = paths[k] if k < len(paths) else last
-        if k == len(starts) - 1:
-            img = last
-        shots.append({"kind": "cover" if k == 0 else "single", "imgs": [img], "dur": max(0.4, end - starts[k])})
-    return shots
-
-
-def render_shot(i, sh):
-    fr = int(sh["dur"] * 30) + 2
-    if sh["kind"] == "cover":                            # full frame, slow push-in
-        ff("-loop", "1", "-framerate", "30", "-i", str(sh["imgs"][0]), "-filter_complex",
-           f"[0:v]scale=2160:3840,zoompan=z='1+0.04*on/{fr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:"
-           "s=1080x1920:fps=30,setsar=1,format=yuv420p[v]", "-map", "[v]", "-t", f"{sh['dur']:.3f}", *x264(20),
-           f"shot{i}.mp4")
-        return f"shot{i}.mp4"
-    z = f"1+0.05*on/{fr}" if i % 2 == 0 else f"1.05-0.05*on/{fr}"
-    ff("-loop", "1", "-framerate", "30", "-i", str(sh["imgs"][0]), "-filter_complex",
-       f"[0:v]scale=2160:{MID_H * 2},zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={fr}:"
-       f"s=1080x{MID_H}:fps=30,setsar=1,format=yuv420p,pad=1080:1920:0:{TOP_BAR}:0x{BG[0]:02X}{BG[1]:02X}{BG[2]:02X}[v]",
-       "-map", "[v]", "-t", f"{sh['dur']:.3f}", *x264(20), f"shot{i}.mp4")
-    return f"shot{i}.mp4"
-
-
-def build_background(shots):
-    parts = [render_shot(i, s) for i, s in enumerate(shots)]
-    (W / "bg.txt").write_text("\n".join(f"file '{p}'" for p in parts), encoding="utf-8")
-    ff("-f", "concat", "-safe", "0", "-i", "bg.txt", "-c", "copy", "bg.mp4")
-
-
-def build_ass(data, timed, total):
-    fam = font_family()
-    style = lambda name, size, col, sp, out, sh, al, ml, mr, mv: (
-        f"Style: {name},{fam},{size},{col},{col},&H00000000&,&H00000000&,-1,0,0,0,100,100,{sp},0,1,{out},{sh},"
-        f"{al},{ml},{mr},{mv},1")
-    ev = lambda layer, s, e, st, txt: f"Dialogue: {layer},{ass_time(s)},{ass_time(e)},{st},,0,0,0,,{txt}"
-    lines = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920", "WrapStyle: 0",
-             "ScaledBorderAndShadow: yes", "", "[V4+ Styles]",
-             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
-             "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-             "Alignment, MarginL, MarginR, MarginV, Encoding",
-             style("Label", 40, ACC_ASS, 6, 0, 0, 8, 60, 60, 125),
-             style("Head", 76, WHITE, 1, 0, 0, 8, 60, 60, 185),
-             style("Body", 58, WHITE, 0, 0, 0, 8, 170, 170, BOT_Y + 35),
-             style("Brand", 30, bgr(THEME["ink"], "50"), 4, 3 if sum(BG) < 200 else 0, 0, 9, 0, 28, TOP_BAR + 18),
-             "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-             ev(0, COVER_END, total, "Label", f"{LABEL}  ·  #{FILE_NO}"),
-             *top_events(data, timed, total, ev),
-             ev(3, COVER_END, total, "Brand", CHANNEL)]
-    lines += [ev(1, s, e, "Body", "{\\fad(120,60)}" + to_ass(text)) for text, s, e in timed]
-    path = W / "subs.ass"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
-
-
-DAY_WORD = "GAINERS"
-TOPBAR = env("TOPBAR", "chapter")                       # chapter | market: what sits above slides 2-3
-D0 = {}
-
-
-def chapters(d0):
-    """Two-line title per narration line (blue line + white line, same look as before): what THIS slide is."""
-    items, out, g, l = d0["items"], [], 0, 0
-    for i, it in enumerate(items, 1):
-        if CATEGORY == "movers":
-            out.append((DAY_WORD, "OF THE DAY"))
-        else:
-            out.append({"news": (f"STORY {i}", f"OF {len(items)}"), "pe": (f"CHEAPEST #{i}", "BY P/E RATIO"),
-                        "month": (f"ANALYSTS' PICK #{i}", "THIS MONTH"),
-                        "y2030": (f"FASTEST GROWER #{i}", "OVER 5 YEARS")}.get(CATEGORY, (f"#{i}", "")))
-    out.append({"movers": ("TECH", "SCOREBOARD"), "news": ("WHAT IT", "MEANS")}.get(CATEGORY, ("THE FULL", "RANKING")))
-    return out
-
-
-def market_strip():
-    """Index ETFs as a market bar: SPY (S&P 500) and QQQ (Nasdaq 100)."""
-    parts = [f"{t} {pct(q['dp'])}" for t in ("SPY", "QQQ") if (q := quote(t))]
-    return "   ".join(parts)
-
-
-def top_events(data, timed, total, ev):
-    """Text above slides 2-3 (instead of repeating the cover headline), in the same two-line style."""
-    two = lambda a, b: "{\\fad(150,0)}" + to_ass(f"[r]{a}[/r]") + ("\\N" + to_ass(b) if b else "")
-    if TOPBAR == "market":
-        strip = market_strip()
-        if strip:
-            return [ev(0, COVER_END, total, "Head", two("MARKET TODAY", strip))]
-    titles = chapters(D0) if D0 else []
-    return [ev(0, s, e, "Head", two(*titles[k]) if k < len(titles) else "")
-            for k, (_, s, e) in enumerate(timed)]
-
-
-def make_video(data, d0):
-    global MUSIC, D0
-    D0 = d0
-    mood = d0.get("mood", "neutral")                     # P/E, analysts, 2030 = neutral facts
-    global MUSIC_START
-    MUSIC = mood_track(mood) or MUSIC
-    if MUSIC.exists() and not env("MUSIC_START"):
-        MUSIC_START = round(random.uniform(0, max(0.0, probe_duration(MUSIC) - MAX_SEC - 5) * 0.6), 1)
-    print("mood:", mood, "| music:", MUSIC if MUSIC.exists() else "none")
-    words = []
-    spoken = plain(data["headline"]) + ". " + " ".join(plain(l) for l in data["lines"])
-    total = min(MAX_SEC, max(MIN_SEC, 1 + len(spoken.split()) * 0.38))
-    if NARRATION:
-        words = tighten(W / "voice.mp3", asyncio.run(_tts(spoken, W / "voice.mp3")))
-        total = min(MAX_SEC, max(MIN_SEC, probe_duration(W / "voice.mp3") + 0.3))
-    timed = line_times(data, words, total)
-    global HEADLINE, COVER_END
-    HEADLINE, COVER_END = data["headline"], timed[0][1] if timed else 2.5
-    shots = build_slides(d0, timed, total)
-    build_background(shots)
-    if SFX:
-        cuts = [sum(s["dur"] for s in shots[:k + 1]) for k in range(len(shots) - 1)]
-        build_sfx(total, timed, cuts, shots, W / "sfx.wav")
-    render(build_ass(data, timed, total), total)
-
-
-def upload(yt, data, d0):
+    tr = gemini(
+        f"Translate this YouTube Short metadata about stocks into these languages: {', '.join(LANGS)} (ISO 639-1). "
+        "Natural, catchy wording; keep company names, tickers, numbers and dollar amounts exact; title max 80 "
+        f"characters; no hashtags.\nTITLE: {title}\nQUESTION: {question}\nSTORY:\n{story_text}\n"
+        'Return JSON: {"<code>": {"title": "...", "question": "...", "story": "..."}, ...}',
+        lambda d: isinstance(d, dict) and sum(isinstance(d.get(l), dict) and bool(d[l].get("title"))
+                                              for l in LANGS) >= max(1, len(LANGS) // 2), rounds=1)
+    return {l: v for l, v in (tr or {}).items() if l in LANGS and isinstance(v, dict) and v.get("title")}
+
+
+def upload(yt, story, script, path):
     from googleapiclient.http import MediaFileUpload
-    title, q = plain(data["title"]), plain(data.get("question", ""))
-    syms = [it["ticker"] for it in d0["items"] if re.fullmatch(r"[A-Z.]{1,6}", it["ticker"])]
-    tags = list(dict.fromkeys(["stocks", "stock market", "investing"] + CAT_TAGS + syms + data.get("tags", [])))
-    story = plain(data["headline"]) + "\n" + "\n".join(plain(l) for l in data["lines"])
-    tail = ("\n\n#Shorts #stocks #investing " + " ".join("#" + s for s in syms[:4]) + "\n\n" + DISCLAIMER)
-    body = {"snippet": {"title": f"{title[:85]} #Shorts", "tags": tags[:15], "categoryId": "27",
-                        "description": ((f"{q} Tell me in the comments!\n\n" if q else "") + story + tail)[:4900],
+    title = script["title"].strip()
+    desc = description(story, script)
+    tags = list(dict.fromkeys(["stocks", "investing", "stock market", "shorts"] + story["names"] + story["tickers"]
+                              + [str(x) for x in script.get("tags", [])]))
+    tags = [t for t in tags if len(t) < 30][:15]
+    body = {"snippet": {"title": f"{title[:90]} #shorts", "description": desc, "tags": tags, "categoryId": "27",
                         "defaultLanguage": "en", "defaultAudioLanguage": "en"},
             "status": {"privacyStatus": env("PRIVACY", "public"), "selfDeclaredMadeForKids": False}}
-    loc = {l: {"title": f"{plain(t['title'])[:85]} #Shorts",
-               "description": ((t["question"] + "\n\n" if t.get("question") else "") + t.get("story", "") + tail)[:4900]}
-           for l, t in translate(title, q, story).items()}
+    tail = desc.split("\n\n", 2)[-1]
+    loc = {l: {"title": f"{str(v['title'])[:90]} #shorts",
+               "description": (f"{v.get('question', '')} 👇\n\n{v.get('story', '')}\n\n{tail}")[:4900]}
+           for l, v in translate(title, script.get("question", ""), "\n".join(script["lines"])).items()}
     if loc:
         body["localizations"] = loc
     send = lambda part: yt.videos().insert(part=part, body=body, media_body=MediaFileUpload(
-        str(W / "final.mp4"), chunksize=-1, resumable=True)).execute()["id"]
+        str(path), chunksize=-1, resumable=True)).execute()
     try:
-        vid = send("snippet,status" + (",localizations" if loc else ""))
+        res = send("snippet,status" + (",localizations" if loc else ""))
     except Exception as e:
         if not loc or "uploadLimitExceeded" in str(e) or "quota" in str(e).lower():
             raise
+        print("localizations rejected:", str(e)[:160])
         body.pop("localizations")
-        vid = send("snippet,status")
-    print("uploaded:", vid)
-    return vid
+        res = send("snippet,status")
+    STATE["channel_id"] = res.get("snippet", {}).get("channelId", STATE.get("channel_id"))
+    print("uploaded:", res["id"])
+    return res["id"]
+
+
+def add_to_playlist(yt, vid, series):
+    name = SERIES_INFO[series][1]
+    try:
+        items = yt.playlists().list(part="snippet", mine=True, maxResults=50).execute().get("items", [])
+        pl = next((i["id"] for i in items if i["snippet"]["title"] == name), None) or yt.playlists().insert(
+            part="snippet,status", body={"snippet": {"title": name, "description": f"{name} - Bull & Bear Daily"},
+                                         "status": {"privacyStatus": "public"}}).execute()["id"]
+        yt.playlistItems().insert(part="snippet", body={"snippet": {
+            "playlistId": pl, "resourceId": {"kind": "youtube#video", "videoId": vid}}}).execute()
+    except Exception as e:
+        print("playlist skipped:", str(e)[:160])
+
+
+def post_comment(yt, vid, script):
+    q = script.get("question", "").strip()
+    try:
+        yt.commentThreads().insert(part="snippet", body={"snippet": {"videoId": vid, "topLevelComment": {
+            "snippet": {"textOriginal": f"{q} 👇\nComment a stock and we'll run the numbers next."}}}}).execute()
+    except Exception as e:
+        print("comment skipped:", str(e)[:160])
+
+
+# =========================================================================================================
+# main
+# =========================================================================================================
+def make(story, hook):
+    script = write_script(story, hook)
+    print(json.dumps({"hook": hook, "lines": script["lines"], "title": script["title"]}, ensure_ascii=False))
+    voice = make_voice(script["lines"], script["beats"]) if env("NARRATION", "1") == "1" else None
+    if voice is None:
+        voice = silent_voice(script["lines"], script["beats"])
+    timing = make_timing(story, voice, script["beats"])
+    audio = make_audio(story, timing, voice)
+    out = WORK / "final.mp4"
+    render_video(story, script, timing, audio, out)
+    return script, out
+
+
+def main():
+    ensure_fonts()
+    yt = None
+    req = Counter()
+    if not DRY:
+        yt = youtube()
+        if LEARN:
+            update_views(yt)
+        req = comment_requests(yt)
+    story = choose_story(req)
+    if story["asked"]:
+        hook = "asked"
+    elif env("HOOK") in HOOK_STYLE:
+        hook = env("HOOK")
+    elif story["series"] == "shock":
+        hook = "number"
+    else:
+        hook = pick(weights_for("hook", HOOKS, {h: 1.0 for h in HOOKS}))
+    script, out = make(story, hook)
+    meta = {"title": script["title"], "description": description(story, script), "series": story["series"],
+            "key": story["key"], "hook": hook}
+    save_json(WORK / "metadata.json", meta)
+    if DRY:
+        print("dry run: video at", out)
+        return
+    vid = upload(yt, story, script, out)
+    STATE["videos"].append({"id": vid, "series": story["series"], "hook": hook, "mode": story["mode"],
+                            "key": story["key"], "tickers": story["tickers"], "date": NOW.isoformat()[:16],
+                            "title": script["title"]})
+    if story["asked"]:
+        STATE["requests_done"][story["tickers"][0]] = TODAY
+    save_state()
+    add_to_playlist(yt, vid, story["series"])
+    post_comment(yt, vid, script)
+    save_state()
 
 
 if __name__ == "__main__":
-    d0 = get_data()
-    print("category:", CATEGORY, "| key:", d0["key"])
-    data = gen_script(d0)
-    print(json.dumps(data, ensure_ascii=False))
-    make_video(data, d0)
-    yt = youtube()
-    vid = upload(yt, data, d0)
-    used.append(d0["key"])
-    USED.write_text(json.dumps(used, ensure_ascii=False, indent=1), encoding="utf-8")
-    add_to_playlist(yt, vid)
-    post_comment(yt, vid, data)
+    main()
