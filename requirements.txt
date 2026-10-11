@@ -4,3 +4,4 @@ pillow
 numpy
 google-api-python-client
 google-auth-oauthlib
+yfinance
