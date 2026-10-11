@@ -1,0 +1,16 @@
+{
+ "XOM": {
+  "name": "Exxonmobil Holdings Corp",
+  "shares": 4144.95,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/960001797516.png",
+  "mcap": 650632.36,
+  "fetched": "2026-10-11"
+ },
+ "CVX": {
+  "name": "Chevron Corp",
+  "shares": 1991.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CVX.png",
+  "mcap": 418823.9935465562,
+  "fetched": "2026-10-11"
+ }
+}
