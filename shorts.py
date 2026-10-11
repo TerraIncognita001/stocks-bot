@@ -19,6 +19,7 @@ import os
 import pathlib
 import random
 import re
+import socket
 import subprocess
 import time
 import wave
@@ -29,6 +30,9 @@ import requests
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 env = os.getenv
+socket.setdefaulttimeout(60)                  # no network call may hang the run
+START = time.time()
+GHA = env("GITHUB_ACTIONS") == "true"
 WORK = pathlib.Path(env("WORK_DIR", "work"))
 WORK.mkdir(parents=True, exist_ok=True)
 DATA = pathlib.Path("data")
@@ -131,6 +135,12 @@ CAP_X, CAP_W = 520, 800                        # captions centre x and max width
 # =========================================================================================================
 # small helpers
 # =========================================================================================================
+def gh_note(level, title, msg):
+    """notice / warning / error: shown on the GitHub Actions run page (Annotations)."""
+    msg = re.sub(r"\s+", " ", str(msg))[:900]
+    print(f"::{level} title={title}::{msg}" if GHA else f"[{level}] {title}: {msg}", flush=True)
+
+
 def clamp(x, a=0.0, b=1.0):
     return max(a, min(b, x))
 
@@ -290,38 +300,45 @@ def recent(field, n):
 # =========================================================================================================
 # network: Finnhub, prices, logos
 # =========================================================================================================
-def http_get(url, params=None, headers=None, timeout=40, tries=3):
+def http_get(url, params=None, headers=None, timeout=20, tries=2):
+    r = None
     for k in range(tries):
         try:
             r = requests.get(url, params=params, headers=UA if headers is None else headers, timeout=timeout)
-            if r.status_code == 429:
-                time.sleep(6 * (k + 1))
+            if r.status_code == 429 and k + 1 < tries:
+                time.sleep(3 * (k + 1))
                 continue
             return r
         except requests.RequestException as e:
             print("net:", url.split("?")[0], type(e).__name__)
-            time.sleep(2 + 2 * k)
-    return None
+            r = None
+            time.sleep(1 + 2 * k)
+    return r
 
 
 def fh_symbol(sym):
     return sym.replace("-", ".")
 
 
+FH_FAILS = Counter()
+
+
 def fh(path, **params):
     key = env("FINNHUB_API_KEY")
-    if not key:
+    if not key or FH_FAILS["net"] >= 4:               # Finnhub down: stop asking for this run
         return None
-    for _ in range(3):
-        r = http_get(f"https://finnhub.io/api/v1/{path}", {**params, "token": key}, headers={}, tries=1)
+    for _ in range(2):
+        r = http_get(f"https://finnhub.io/api/v1/{path}", {**params, "token": key}, headers={}, tries=1, timeout=15)
         time.sleep(1.05)                              # free tier: 60 calls / minute
-        if r is None:
+        if r is None or r.status_code >= 500:
+            FH_FAILS["net"] += 1
             continue
+        FH_FAILS["net"] = 0
         if r.status_code == 429:
-            time.sleep(15)
+            time.sleep(10)
             continue
         if r.status_code in (401, 403):
-            print("finnhub", path, r.status_code, "(not on this plan)")
+            print("finnhub", path, r.status_code, "(not on this plan / bad key)")
             return None
         try:
             return r.json()
@@ -390,49 +407,76 @@ def company_news(sym, days=2, k=4):
 
 
 # ---- monthly price history (adjusted when the source supports it), cached in data/prices ----------------
+class DataError(Exception):
+    pass
+
+
+def need_ok(r, what):
+    if r is None:
+        raise DataError(f"{what}: no answer (network/timeout)")
+    if r.status_code != 200:
+        raise DataError(f"{what}: HTTP {r.status_code} {r.text[:90]!r}")
+    return r
+
+
 def from_tiingo(sym):
     key = env("TIINGO_API_KEY")
     if not key:
-        return None, None
-    r = http_get(f"https://api.tiingo.com/tiingo/daily/{sym.lower()}/prices",
-                 {"startDate": "1985-01-01", "resampleFreq": "monthly", "token": key},
-                 headers={"Content-Type": "application/json"})
-    if r is None or r.status_code != 200:
-        return None, None
+        raise DataError("Tiingo: TIINGO_API_KEY secret is not set")
+    r = need_ok(http_get(f"https://api.tiingo.com/tiingo/daily/{sym.lower()}/prices",
+                         {"startDate": "1985-01-01", "resampleFreq": "monthly", "token": key},
+                         headers={"Content-Type": "application/json"}), "Tiingo")
     rows = r.json()
+    if not isinstance(rows, list):
+        raise DataError(f"Tiingo: {str(rows)[:120]}")
     return [(row["date"][:7], float(row["adjClose"])) for row in rows if row.get("adjClose")], True
+
+
+def from_yfinance(sym):
+    try:
+        import yfinance as yf
+    except ImportError:
+        raise DataError("yfinance: not installed")
+    h = yf.Ticker(sym).history(period="max", interval="1mo", auto_adjust=True, actions=False, timeout=20)
+    if h is None or h.empty:
+        raise DataError("yfinance: empty answer (Yahoo blocked?)")
+    return [(i.strftime("%Y-%m"), float(c)) for i, c in zip(h.index, h["Close"]) if c == c and c > 0], True
 
 
 def from_alphavantage(sym):
     key = env("ALPHAVANTAGE_API_KEY")
     if not key:
-        return None, None
-    r = http_get("https://www.alphavantage.co/query",
-                 {"function": "TIME_SERIES_MONTHLY_ADJUSTED", "symbol": sym, "apikey": key})
-    if r is None or r.status_code != 200:
-        return None, None
-    js = r.json().get("Monthly Adjusted Time Series") or {}
+        raise DataError("Alpha Vantage: ALPHAVANTAGE_API_KEY secret is not set")
+    r = need_ok(http_get("https://www.alphavantage.co/query",
+                         {"function": "TIME_SERIES_MONTHLY_ADJUSTED", "symbol": sym, "apikey": key}), "Alpha Vantage")
+    data = r.json()
+    js = data.get("Monthly Adjusted Time Series")
+    if not js:
+        raise DataError(f"Alpha Vantage: {str(data)[:120]}")
     return [(d[:7], float(v["5. adjusted close"])) for d, v in js.items()], True
 
 
 def from_yahoo(sym):
+    err = None
     for host in ("query2", "query1"):
-        r = http_get(f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
-                     {"range": "max", "interval": "1mo", "includeAdjustedClose": "true", "events": "div,split"})
-        if r is None or r.status_code != 200:
+        try:
+            r = need_ok(http_get(f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
+                                 {"range": "max", "interval": "1mo", "includeAdjustedClose": "true",
+                                  "events": "div,split"}, tries=1), "Yahoo")
+        except DataError as e:
+            err = e
             continue
         res = r.json()["chart"]["result"][0]
         adj = res["indicators"]["adjclose"][0]["adjclose"]
-        pts = [(dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m"), float(a))
-               for t, a in zip(res["timestamp"], adj) if a]
-        return pts, True
-    return None, None
+        return [(dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m"), float(a))
+                for t, a in zip(res["timestamp"], adj) if a], True
+    raise err or DataError("Yahoo: no answer")
 
 
 def from_stooq(sym):
-    r = http_get("https://stooq.com/q/d/l/", {"s": f"{sym.lower().replace('-', '.')}.us", "i": "m"})
-    if r is None or r.status_code != 200 or not r.text.startswith("Date"):
-        return None, None
+    r = need_ok(http_get("https://stooq.com/q/d/l/", {"s": f"{sym.lower()}.us", "i": "m"}, tries=1), "Stooq")
+    if not r.text.startswith("Date"):
+        raise DataError(f"Stooq: not a CSV {r.text[:60]!r}")
     pts = []
     for line in r.text.strip().splitlines()[1:]:
         p = line.split(",")
@@ -441,8 +485,9 @@ def from_stooq(sym):
     return pts, False                                 # split-adjusted only
 
 
-PROVIDERS = [("Tiingo", from_tiingo), ("Alpha Vantage", from_alphavantage), ("Yahoo Finance", from_yahoo),
-             ("Stooq", from_stooq)]
+PROVIDERS = [("Tiingo", from_tiingo), ("yfinance", from_yfinance), ("Yahoo", from_yahoo),
+             ("Alpha Vantage", from_alphavantage), ("Stooq", from_stooq)]
+PRICE_FAIL, DEAD, PROVIDER_ERR, PROVIDER_OK = set(), Counter(), {}, Counter()
 
 
 def price_history(sym, force=False):
@@ -450,17 +495,30 @@ def price_history(sym, force=False):
     cached = load_json(path, None)
     if cached and days_since(cached.get("updated", "")) < 7 and not force:
         return cached
+    if sym in PRICE_FAIL:
+        return cached
     for name, fn in PROVIDERS:
+        if DEAD[name] >= 3:                           # this source is down / not set up: skip for this run
+            continue
         try:
             pts, div = fn(sym)
         except Exception as e:
-            print("prices:", name, sym, type(e).__name__, str(e)[:120])
+            reason = str(e) if isinstance(e, DataError) else f"{name}: {type(e).__name__} {str(e)[:100]}"
+            print("prices:", sym, "|", reason[:200])
+            PROVIDER_ERR.setdefault(name, reason[:200])
+            DEAD[name] += 3 if "is not set" in reason or "not installed" in reason else 1
             continue
-        if pts and len(pts) >= 24:
-            data = {"src": name, "div": bool(div), "updated": TODAY, "points": sorted(dict(pts).items())}
-            save_json(path, data)
-            print(f"prices: {sym} from {name} ({len(data['points'])} months)")
-            return data
+        if not pts or len(pts) < 24:                  # too young a listing: no source will do better
+            print(f"prices: {sym} has only {len(pts or [])} months")
+            break
+        DEAD[name] = 0
+        PROVIDER_OK[name] += 1
+        data = {"src": name.replace("yfinance", "Yahoo Finance"), "div": bool(div), "updated": TODAY,
+                "points": sorted(dict(pts).items())}
+        save_json(path, data)
+        print(f"prices: {sym} from {name} ({len(data['points'])} months)")
+        return data
+    PRICE_FAIL.add(sym)
     if cached:
         print("prices: using older cache for", sym)
     return cached
@@ -971,6 +1029,9 @@ def choose_story(requests_):
         order.append(pick(weights_for("series", list(base), base)))
     used_keys = set(recent("key", 60))
     for series in order:
+        if time.time() - START > 9 * 60:
+            print("story search: out of time")
+            break
         try:
             story = build_story(series, requests_, tick, used_keys)
         except Exception as e:                      # one bad data source must not kill the run
@@ -979,15 +1040,22 @@ def choose_story(requests_):
         if story:
             print("series:", story["series"], "| key:", story["key"])
             return story
-    raise SystemExit("No story could be built (no price data?)")
+    why = " | ".join(PROVIDER_ERR.values()) or "no details"
+    gh_note("error", "No price data", f"Could not load price history for any stock. {why}. Fix: add the "
+            "TIINGO_API_KEY secret (free at tiingo.com) or check the errors above.")
+    raise SystemExit(1)
 
 
 # =========================================================================================================
 # script (Gemini words it, code checks it; templates if Gemini is unavailable)
 # =========================================================================================================
-def gemini(prompt, ok, rounds=3):
+GEMINI_ERR = []
+
+
+def gemini(prompt, ok, rounds=2):
     key = env("GEMINI_API_KEY")
     if not key:
+        GEMINI_ERR.append("GEMINI_API_KEY secret is not set")
         return None
     models = [env("GEMINI_MODEL", "gemini-3.5-flash"), "gemini-flash-latest", "gemini-3.1-flash-lite"]
     for r in range(rounds):
@@ -995,20 +1063,23 @@ def gemini(prompt, ok, rounds=3):
             try:
                 resp = requests.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    params={"key": key}, timeout=(15, 90),
+                    params={"key": key}, timeout=(10, 60),
                     json={"contents": [{"parts": [{"text": prompt}]}],
                           "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9}})
                 if not resp.ok:
                     print(model, resp.status_code)
+                    GEMINI_ERR.append(f"{model} HTTP {resp.status_code}")
                     continue
                 data = json.loads(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
                 if ok(data):
                     return data
                 print(model, "rejected output")
+                GEMINI_ERR.append(f"{model} output failed the checks")
             except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
                 print(model, "error:", type(e).__name__)
+                GEMINI_ERR.append(f"{model} {type(e).__name__}")
         if r + 1 < rounds:
-            time.sleep(20)
+            time.sleep(10)
     return None
 
 
@@ -1232,6 +1303,7 @@ def write_script(story, hook):
     data = gemini(prompt, ok)
     if not data:
         print("script: template")
+        gh_note("warning", "Script", "Gemini unavailable, template script used: " + "; ".join(GEMINI_ERR[-6:]))
         data = {"lines": template_script(story, hook, beats),
                 "question": random.choice(["Which stock should we run next?", "Would you have held on?",
                                            "Which company should we test next?"]) if story["series"] != "battle" else
@@ -2258,6 +2330,8 @@ def make(story, hook):
     print(json.dumps({"hook": hook, "lines": script["lines"], "title": script["title"]}, ensure_ascii=False))
     voice = make_voice(script["lines"], script["beats"]) if env("NARRATION", "1") == "1" else None
     if voice is None:
+        if env("NARRATION", "1") == "1":
+            gh_note("warning", "Voice", "edge-tts failed: this video has no voice-over")
         voice = silent_voice(script["lines"], script["beats"])
     timing = make_timing(story, voice, script["beats"])
     audio = make_audio(story, timing, voice)
@@ -2276,6 +2350,9 @@ def main():
             update_views(yt)
         req = comment_requests(yt)
     story = choose_story(req)
+    gh_note("notice", "Story", f"{story['series']} | {story['key']} | prices: {story.get('src')}")
+    if PROVIDER_ERR:
+        gh_note("warning", "Price sources", " | ".join(PROVIDER_ERR.values()))
     if story["asked"]:
         hook = "asked"
     elif env("HOOK") in HOOK_STYLE:
@@ -2290,6 +2367,7 @@ def main():
     save_json(WORK / "metadata.json", meta)
     if DRY:
         print("dry run: video at", out)
+        gh_note("notice", "Dry run", f"{script['title']} || " + " / ".join(script["lines"]))
         return
     vid = upload(yt, story, script, out)
     STATE["videos"].append({"id": vid, "series": story["series"], "hook": hook, "mode": story["mode"],
@@ -2301,6 +2379,8 @@ def main():
     add_to_playlist(yt, vid, story["series"])
     post_comment(yt, vid, script)
     save_state()
+    gh_note("notice", "Uploaded", f"https://youtube.com/shorts/{vid} | {script['title']} | "
+            f"{time.time() - START:.0f}s")
 
 
 if __name__ == "__main__":
