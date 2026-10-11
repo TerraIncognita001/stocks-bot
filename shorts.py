@@ -770,11 +770,12 @@ def story_battle(a, b):
     yrs = round((n - 1) / 12)
     win = a if va[-1] >= vb[-1] else b
     wv, lv = max(va[-1], vb[-1]), min(va[-1], vb[-1])
+    close = say_money(va[-1]) == say_money(vb[-1])
     facts = {
         "company_a": name_of(a), "company_b": name_of(b), "invested_each": "$1,000",
         "start": month_label(months[0], True), "start_year": int(months[0][:4]), "years": yrs,
-        "final_a": money(va[-1]), "final_a_say": say_money(va[-1]),
-        "final_b": money(vb[-1]), "final_b_say": say_money(vb[-1]),
+        "final_a": money(va[-1]), "final_a_say": money(va[-1]) if close else say_money(va[-1]),
+        "final_b": money(vb[-1]), "final_b_say": money(vb[-1]) if close else say_money(vb[-1]),
         "winner": name_of(win), "winner_multiple": f"{wv / 1000:.1f}" if wv < 10000 else f"{wv / 1000:.0f}",
         "difference": money(wv - lv), "difference_say": say_money(wv - lv),
         "as_of": "today" if (sa["live"] and sb["live"]) else month_label(months[-1], True),
@@ -989,10 +990,19 @@ def build_story(series, requests_, tick, used_keys):
         pairs = [tuple(tick[:2])] if len(tick) >= 2 else \
             [p for p in BATTLES if f"battle {p[0]} {p[1]}" not in used_keys]
         random.shuffle(pairs)
+        best = None
         for a, b in pairs[:4]:
             story = story_battle(a, b)
-            if story:
+            if not story:
+                continue
+            fa, fb = story["lines"][0][-1], story["lines"][1][-1]
+            margin = abs(fa - fb) / max(fa, fb)
+            if margin >= 0.12 or len(tick) >= 2:      # a clear winner (or the pair was asked for)
                 return story
+            if best is None or margin > best[0]:
+                best = (margin, story)
+        if best:
+            return best[1]
     elif series == "peak":
         pool = tick[:1] or [s for s in PEAK_POOL if s not in {t for v in STATE["videos"][-20:]
                                                                for t in v.get("tickers", [])}]
@@ -2351,8 +2361,9 @@ def main():
         req = comment_requests(yt)
     story = choose_story(req)
     gh_note("notice", "Story", f"{story['series']} | {story['key']} | prices: {story.get('src')}")
-    if PROVIDER_ERR:
-        gh_note("warning", "Price sources", " | ".join(PROVIDER_ERR.values()))
+    errs = [v for v in PROVIDER_ERR.values() if "is not set" not in v]
+    if errs:
+        gh_note("warning", "Price sources", " | ".join(errs))
     if story["asked"]:
         hook = "asked"
     elif env("HOOK") in HOOK_STYLE:
