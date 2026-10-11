@@ -19,7 +19,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: shorts
+  group: shorts-test
   cancel-in-progress: false
 jobs:
   gate:                           # is this one of the London slots? (manual runs always pass)
