@@ -38,6 +38,18 @@
    ],
    "date": "2026-10-12T06:01",
    "title": "Stock Battle: S&P 500 vs Tesla - Who Won?"
+  },
+  {
+   "id": "mEOSF-GTQ-U",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-12",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-12T22:59",
+   "title": "TSMC Just Lost $232 Billion in One Day"
   }
  ],
  "requests_done": {},

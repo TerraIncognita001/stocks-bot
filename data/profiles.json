@@ -12,5 +12,474 @@
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TSLA.png",
   "mcap": 1511491.8693601443,
   "fetched": "2026-10-12"
+ },
+ "AAPL": {
+  "name": "Apple Inc",
+  "shares": 14687.36,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AAPL.png",
+  "mcap": 4912984.843791244,
+  "fetched": "2026-10-12"
+ },
+ "MSFT": {
+  "name": "Microsoft Corp",
+  "shares": 7425.55,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MSFT.png",
+  "mcap": 3973186.4712462006,
+  "fetched": "2026-10-12"
+ },
+ "NVDA": {
+  "name": "NVIDIA Corp",
+  "shares": 24200,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959144056.png",
+  "mcap": 5525647.897570095,
+  "fetched": "2026-10-12"
+ },
+ "AMZN": {
+  "name": "Amazon.com Inc",
+  "shares": 10757.11,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMZN.png",
+  "mcap": 2830652.4747320856,
+  "fetched": "2026-10-12"
+ },
+ "GOOGL": {
+  "name": "Alphabet Inc",
+  "shares": 12230,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GOOG.png",
+  "mcap": 4300801.800000001,
+  "fetched": "2026-10-12"
+ },
+ "META": {
+  "name": "Meta Platforms Inc",
+  "shares": 2538.42,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/FB.png",
+  "mcap": 1830816.2705016697,
+  "fetched": "2026-10-12"
+ },
+ "NFLX": {
+  "name": "Netflix Inc",
+  "shares": 4163.94,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NFLX.png",
+  "mcap": 292724.9766329579,
+  "fetched": "2026-10-12"
+ },
+ "COST": {
+  "name": "Costco Wholesale Corp",
+  "shares": 443.48,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COST.png",
+  "mcap": 419608.02090949257,
+  "fetched": "2026-10-12"
+ },
+ "MCD": {
+  "name": "McDonald's Corp",
+  "shares": 710.51,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MCD.png",
+  "mcap": 166458.5009326922,
+  "fetched": "2026-10-12"
+ },
+ "KO": {
+  "name": "Coca-Cola Co",
+  "shares": 4302.55,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/KO.png",
+  "mcap": 378839.4098267979,
+  "fetched": "2026-10-12"
+ },
+ "PEP": {
+  "name": "PepsiCo Inc",
+  "shares": 1364.89,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PEP.png",
+  "mcap": 171935.37476589996,
+  "fetched": "2026-10-12"
+ },
+ "DIS": {
+  "name": "Walt Disney Co",
+  "shares": 1736.51,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DIS.png",
+  "mcap": 186568.51257455334,
+  "fetched": "2026-10-12"
+ },
+ "SBUX": {
+  "name": "Starbucks Corp",
+  "shares": 1140,
+  "logo": "https://static9.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959080056.png",
+  "mcap": 103454.99898355329,
+  "fetched": "2026-10-12"
+ },
+ "WMT": {
+  "name": "Walmart Inc",
+  "shares": 7958.08,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/WMT.png",
+  "mcap": 884142.59,
+  "fetched": "2026-10-12"
+ },
+ "HD": {
+  "name": "Home Depot Inc",
+  "shares": 997.12,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/HD.png",
+  "mcap": 290068.2860361319,
+  "fetched": "2026-10-12"
+ },
+ "LOW": {
+  "name": "Lowe's Companies Inc",
+  "shares": 560.71,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LOW.png",
+  "mcap": 104356.0503694043,
+  "fetched": "2026-10-12"
+ },
+ "V": {
+  "name": "Visa Inc",
+  "shares": 1867.05,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/V.png",
+  "mcap": 719653.4160428834,
+  "fetched": "2026-10-12"
+ },
+ "MA": {
+  "name": "Mastercard Inc",
+  "shares": 883.58,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MA.png",
+  "mcap": 516092.50265743834,
+  "fetched": "2026-10-12"
+ },
+ "JPM": {
+  "name": "JPMorgan Chase & Co",
+  "shares": 2658.2,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JPM.png",
+  "mcap": 885149.4850055827,
+  "fetched": "2026-10-12"
+ },
+ "BAC": {
+  "name": "Bank of America Corp",
+  "shares": 7017.97,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BAC.png",
+  "mcap": 379846.10475448903,
+  "fetched": "2026-10-12"
+ },
+ "BRK-B": {
+  "name": "Berkshire Hathaway Inc",
+  "shares": 1.44,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BRK.B.png",
+  "mcap": 993421.589458947,
+  "fetched": "2026-10-12"
+ },
+ "AMD": {
+  "name": "Advanced Micro Devices Inc",
+  "shares": 1630.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMD.png",
+  "mcap": 992708.0209394682,
+  "fetched": "2026-10-12"
+ },
+ "INTC": {
+  "name": "Intel Corp",
+  "shares": 5044,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/INTC.png",
+  "mcap": 553455.2520422403,
+  "fetched": "2026-10-12"
+ },
+ "ORCL": {
+  "name": "Oracle Corp",
+  "shares": 2880.47,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ORCL.png",
+  "mcap": 427556.2899682011,
+  "fetched": "2026-10-12"
+ },
+ "ADBE": {
+  "name": "Adobe Inc",
+  "shares": 397.5,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ADBE.png",
+  "mcap": 94291.48815090275,
+  "fetched": "2026-10-12"
+ },
+ "CRM": {
+  "name": "Salesforce Inc",
+  "shares": 819,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CRM.png",
+  "mcap": 188573.99252666617,
+  "fetched": "2026-10-12"
+ },
+ "PYPL": {
+  "name": "PayPal Holdings Inc",
+  "shares": 855.46,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PYPL.png",
+  "mcap": 47503.74286562978,
+  "fetched": "2026-10-12"
+ },
+ "UBER": {
+  "name": "Uber Technologies Inc",
+  "shares": 2035.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/UBER.png",
+  "mcap": 146063.4740765413,
+  "fetched": "2026-10-12"
+ },
+ "LYFT": {
+  "name": "Lyft Inc",
+  "shares": 379.68,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LYFT.png",
+  "mcap": 6139.9225789683815,
+  "fetched": "2026-10-12"
+ },
+ "ABNB": {
+  "name": "Airbnb Inc",
+  "shares": 593.5,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ABNB.png",
+  "mcap": 99320.5810501103,
+  "fetched": "2026-10-12"
+ },
+ "SHOP": {
+  "name": "Shopify Inc",
+  "shares": 1297.65,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/SHOP.png",
+  "mcap": 219823.13474350784,
+  "fetched": "2026-10-12"
+ },
+ "SPOT": {
+  "name": "Spotify Technology SA",
+  "shares": 205.62,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/SPOT.png",
+  "mcap": 108940.57757419754,
+  "fetched": "2026-10-12"
+ },
+ "PLTR": {
+  "name": "Palantir Technologies Inc",
+  "shares": 2397.31,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PLTR.png",
+  "mcap": 502359.3315542537,
+  "fetched": "2026-10-12"
+ },
+ "COIN": {
+  "name": "Coinbase Global Inc",
+  "shares": 263.46,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COIN.png",
+  "mcap": 47329.71943,
+  "fetched": "2026-10-12"
+ },
+ "HOOD": {
+  "name": "Robinhood Markets Inc",
+  "shares": 900.51,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/HOOD.png",
+  "mcap": 98017.95299700252,
+  "fetched": "2026-10-12"
+ },
+ "RBLX": {
+  "name": "Roblox Corp",
+  "shares": 715.98,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/RBLX.png",
+  "mcap": 34354.33900974715,
+  "fetched": "2026-10-12"
+ },
+ "SNAP": {
+  "name": "Snap Inc",
+  "shares": 1682.28,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/SNAP.png",
+  "mcap": 10536.162380114336,
+  "fetched": "2026-10-12"
+ },
+ "PTON": {
+  "name": "Peloton Interactive Inc",
+  "shares": 432.99,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PTON.png",
+  "mcap": 2247.023593105691,
+  "fetched": "2026-10-12"
+ },
+ "ZM": {
+  "name": "Zoom Communications Inc",
+  "shares": 293.23,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ZM.png",
+  "mcap": 27071.2,
+  "fetched": "2026-10-12"
+ },
+ "GME": {
+  "name": "GameStop Corp",
+  "shares": 448.69,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GME.png",
+  "mcap": 13399.547111582277,
+  "fetched": "2026-10-12"
+ },
+ "AMC": {
+  "name": "AMC Entertainment Holdings Inc",
+  "shares": 892.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMC.png",
+  "mcap": 2659.961855965278,
+  "fetched": "2026-10-12"
+ },
+ "BA": {
+  "name": "Boeing Co",
+  "shares": 790.37,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BA.png",
+  "mcap": 150462.73597020353,
+  "fetched": "2026-10-12"
+ },
+ "F": {
+  "name": "Ford Motor Co",
+  "shares": 3987.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/F.png",
+  "mcap": 48529.03704226694,
+  "fetched": "2026-10-12"
+ },
+ "GM": {
+  "name": "General Motors Co",
+  "shares": 877.45,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GM.png",
+  "mcap": 72591.56574628378,
+  "fetched": "2026-10-12"
+ },
+ "LULU": {
+  "name": "Lululemon Athletica Inc",
+  "shares": 113.55,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LULU.png",
+  "mcap": 10945.562970996976,
+  "fetched": "2026-10-12"
+ },
+ "CMG": {
+  "name": "Chipotle Mexican Grill Inc",
+  "shares": 1267.84,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CMG.png",
+  "mcap": 39974.55400617962,
+  "fetched": "2026-10-12"
+ },
+ "TGT": {
+  "name": "Target Corp",
+  "shares": 454.19,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TGT.png",
+  "mcap": 69798.15064277798,
+  "fetched": "2026-10-12"
+ },
+ "PG": {
+  "name": "Procter & Gamble Co",
+  "shares": 2328.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PG.png",
+  "mcap": 351257.732957352,
+  "fetched": "2026-10-12"
+ },
+ "JNJ": {
+  "name": "Johnson & Johnson",
+  "shares": 2409.9,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JNJ.png",
+  "mcap": 630043.8744880123,
+  "fetched": "2026-10-12"
+ },
+ "PFE": {
+  "name": "Pfizer Inc",
+  "shares": 5699.44,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PFE.png",
+  "mcap": 161186.7602825665,
+  "fetched": "2026-10-12"
+ },
+ "MRNA": {
+  "name": "Moderna Inc",
+  "shares": 396.79,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MRNA.png",
+  "mcap": 89828.07083109138,
+  "fetched": "2026-10-12"
+ },
+ "LLY": {
+  "name": "Eli Lilly and Co",
+  "shares": 941.74,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LLY.png",
+  "mcap": 1110114.1118602557,
+  "fetched": "2026-10-12"
+ },
+ "XOM": {
+  "name": "Exxonmobil Holdings Corp",
+  "shares": 4144.95,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/960001797516.png",
+  "mcap": 650632.36,
+  "fetched": "2026-10-12"
+ },
+ "CVX": {
+  "name": "Chevron Corp",
+  "shares": 1991.6,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CVX.png",
+  "mcap": 418823.9935465562,
+  "fetched": "2026-10-12"
+ },
+ "CAT": {
+  "name": "Caterpillar Inc",
+  "shares": 460.59,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CAT.png",
+  "mcap": 367955.9363798077,
+  "fetched": "2026-10-12"
+ },
+ "IBM": {
+  "name": "International Business Machines Corp",
+  "shares": 942.13,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/IBM.png",
+  "mcap": 213986.98671501424,
+  "fetched": "2026-10-12"
+ },
+ "CSCO": {
+  "name": "Cisco Systems Inc",
+  "shares": 3941.43,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950800186156.png",
+  "mcap": 466762.83337242046,
+  "fetched": "2026-10-12"
+ },
+ "QCOM": {
+  "name": "Qualcomm Inc",
+  "shares": 1050,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/QCOM.png",
+  "mcap": 187405.82245945118,
+  "fetched": "2026-10-12"
+ },
+ "AVGO": {
+  "name": "Broadcom Inc",
+  "shares": 4757.58,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AVGO.png",
+  "mcap": 1725858.218029766,
+  "fetched": "2026-10-12"
+ },
+ "MU": {
+  "name": "Micron Technology Inc",
+  "shares": 1129.39,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MU.png",
+  "mcap": 1162145.4269846852,
+  "fetched": "2026-10-12"
+ },
+ "TSM": {
+  "name": "Taiwan Semiconductor Manufacturing Co Ltd",
+  "shares": 25932.37,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/2330.TW.png",
+  "mcap": 66127541.308594,
+  "fetched": "2026-10-12"
+ },
+ "SONY": {
+  "name": "Sony Group Corp",
+  "shares": 5965.32,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/6758.T.png",
+  "mcap": 21960027.860352,
+  "fetched": "2026-10-12"
+ },
+ "BABA": {
+  "name": "Alibaba Group Holding Ltd",
+  "shares": 19063.63,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BABA.png",
+  "mcap": 264412.16683053545,
+  "fetched": "2026-10-12"
+ },
+ "RIVN": {
+  "name": "Rivian Automotive Inc",
+  "shares": 1447.37,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950373444066.png",
+  "mcap": 20212.13414940405,
+  "fetched": "2026-10-12"
+ },
+ "LCID": {
+  "name": "Lucid Group Inc",
+  "shares": 390.26,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LCID.png",
+  "mcap": 1493.5259954947644,
+  "fetched": "2026-10-12"
+ },
+ "SMCI": {
+  "name": "Super Micro Computer Inc",
+  "shares": 646.83,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/SMCI.png",
+  "mcap": 27497.286820914425,
+  "fetched": "2026-10-12"
+ },
+ "DUOL": {
+  "name": "Duolingo Inc",
+  "shares": 46.59,
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DUOL.png",
+  "mcap": 7014.159048279328,
+  "fetched": "2026-10-12"
  }
 }
