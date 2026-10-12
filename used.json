@@ -25,6 +25,19 @@
    ],
    "date": "2026-10-12T00:04",
    "title": "What $1,000 in Nike in 2020 Is Worth Today"
+  },
+  {
+   "id": "lCyQoJuFIeY",
+   "series": "battle",
+   "hook": "number",
+   "mode": "battle",
+   "key": "battle SPY TSLA",
+   "tickers": [
+    "SPY",
+    "TSLA"
+   ],
+   "date": "2026-10-12T06:01",
+   "title": "Stock Battle: S&P 500 vs Tesla - Who Won?"
   }
  ],
  "requests_done": {},
