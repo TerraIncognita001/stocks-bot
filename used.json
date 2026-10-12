@@ -50,6 +50,18 @@
    ],
    "date": "2026-10-12T22:59",
    "title": "TSMC Just Lost $232 Billion in One Day"
+  },
+  {
+   "id": "_1CbyH8ftCI",
+   "series": "time_machine",
+   "hook": "question",
+   "mode": "crash",
+   "key": "time_machine INTC crash 7",
+   "tickers": [
+    "INTC"
+   ],
+   "date": "2026-10-12T23:58",
+   "title": "What $1,000 in Intel During COVID Is Worth Today"
   }
  ],
  "requests_done": {},
