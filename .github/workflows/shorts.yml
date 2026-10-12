@@ -4,7 +4,7 @@ on:
     # Videos go out at about 23:00, 00:00, 01:00 and 07:00 London time, all year.
     # Runs start at :47 of the hour before (GitHub starts late + a few minutes to make and upload).
     # Cron is UTC, so summer (BST) and winter (GMT) hours are both listed; the gate keeps the right ones.
-    - cron: "47 21,22,23,0,5,6 * * *"
+    - cron: "47 22,23,0,5,6,7 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
