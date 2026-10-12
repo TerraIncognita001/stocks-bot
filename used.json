@@ -1,13 +1,32 @@
-[
- "pe All 2026-10",
- "month All 2026-10",
- "y2030 All 2026-10",
- "pe Tech 2026-10",
- "movers 2026-10-08",
- "news 2026-10-08",
- "month Tech 2026-10",
- "y2030 Tech 2026-10",
- "pe Finance 2026-10",
- "movers 2026-10-09",
- "news 2026-10-09"
-]
+{
+ "legacy": [
+  "pe All 2026-10",
+  "month All 2026-10",
+  "y2030 All 2026-10",
+  "pe Tech 2026-10",
+  "movers 2026-10-08",
+  "news 2026-10-08",
+  "month Tech 2026-10",
+  "y2030 Tech 2026-10",
+  "pe Finance 2026-10",
+  "movers 2026-10-09",
+  "news 2026-10-09"
+ ],
+ "version": 2,
+ "videos": [
+  {
+   "id": "417Nx_Yo8_Y",
+   "series": "time_machine",
+   "hook": "number",
+   "mode": "crash",
+   "key": "time_machine NKE crash 7",
+   "tickers": [
+    "NKE"
+   ],
+   "date": "2026-10-12T00:04",
+   "title": "What $1,000 in Nike in 2020 Is Worth Today"
+  }
+ ],
+ "requests_done": {},
+ "channel_id": "UCL7-xJYAHcBbyEDDXI4xVDQ"
+}
