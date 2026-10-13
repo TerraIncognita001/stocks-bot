@@ -74,6 +74,18 @@
    ],
    "date": "2026-10-13T01:16",
    "title": "Time Machine: Did McDonald's Beat The Market?"
+  },
+  {
+   "id": "IKK8VNf3ee8",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine ADBE ago 10",
+   "tickers": [
+    "ADBE"
+   ],
+   "date": "2026-10-13T06:01",
+   "title": "Adobe: Did $1,000 in 2016 Beat the Market?"
   }
  ],
  "requests_done": {},
