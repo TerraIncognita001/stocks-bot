@@ -86,6 +86,18 @@
    ],
    "date": "2026-10-13T06:01",
    "title": "Adobe: Did $1,000 in 2016 Beat the Market?"
+  },
+  {
+   "id": "UD2lXlnSEa4",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-13",
+   "tickers": [
+    "NVDA"
+   ],
+   "date": "2026-10-13T23:07",
+   "title": "Nvidia Just Added $53 Billion in One Day"
   }
  ],
  "requests_done": {},
