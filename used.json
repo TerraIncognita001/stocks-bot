@@ -24,7 +24,9 @@
     "NKE"
    ],
    "date": "2026-10-12T00:04",
-   "title": "What $1,000 in Nike in 2020 Is Worth Today"
+   "title": "What $1,000 in Nike in 2020 Is Worth Today",
+   "views": 826,
+   "views_at": "2026-10-14"
   },
   {
    "id": "lCyQoJuFIeY",
@@ -37,7 +39,9 @@
     "TSLA"
    ],
    "date": "2026-10-12T06:01",
-   "title": "Stock Battle: S&P 500 vs Tesla - Who Won?"
+   "title": "Stock Battle: S&P 500 vs Tesla - Who Won?",
+   "views": 348,
+   "views_at": "2026-10-14"
   },
   {
    "id": "mEOSF-GTQ-U",
@@ -49,7 +53,9 @@
     "TSM"
    ],
    "date": "2026-10-12T22:59",
-   "title": "TSMC Just Lost $232 Billion in One Day"
+   "title": "TSMC Just Lost $232 Billion in One Day",
+   "views": 816,
+   "views_at": "2026-10-14"
   },
   {
    "id": "_1CbyH8ftCI",
@@ -61,7 +67,9 @@
     "INTC"
    ],
    "date": "2026-10-12T23:58",
-   "title": "What $1,000 in Intel During COVID Is Worth Today"
+   "title": "What $1,000 in Intel During COVID Is Worth Today",
+   "views": 889,
+   "views_at": "2026-10-14"
   },
   {
    "id": "vhXa8WOZuDk",
@@ -98,6 +106,19 @@
    ],
    "date": "2026-10-13T23:07",
    "title": "Nvidia Just Added $53 Billion in One Day"
+  },
+  {
+   "id": "cCXqiBNYPf0",
+   "series": "battle",
+   "hook": "number",
+   "mode": "battle",
+   "key": "battle MCD CMG",
+   "tickers": [
+    "MCD",
+    "CMG"
+   ],
+   "date": "2026-10-14T00:05",
+   "title": "Stock Battle: McDonald's vs Chipotle Since 2016"
   }
  ],
  "requests_done": {},
