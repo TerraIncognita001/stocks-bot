@@ -119,6 +119,18 @@
    ],
    "date": "2026-10-14T00:05",
    "title": "Stock Battle: McDonald's vs Chipotle Since 2016"
+  },
+  {
+   "id": "KITbW6cLhB4",
+   "series": "time_machine",
+   "hook": "imagine",
+   "mode": "ago",
+   "key": "time_machine AMZN ago 15",
+   "tickers": [
+    "AMZN"
+   ],
+   "date": "2026-10-14T06:10",
+   "title": "Amazon: What $1,000 in 2011 turned into today"
   }
  ],
  "requests_done": {},
