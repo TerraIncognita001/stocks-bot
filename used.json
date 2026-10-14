@@ -131,6 +131,18 @@
    ],
    "date": "2026-10-14T06:10",
    "title": "Amazon: What $1,000 in 2011 turned into today"
+  },
+  {
+   "id": "FENq-hNXBlw",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-14",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-14T23:07",
+   "title": "MARKET SHOCK: TSMC’s Massive Multi-Billion Dollar Drop"
   }
  ],
  "requests_done": {},
