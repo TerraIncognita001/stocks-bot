@@ -25,8 +25,8 @@
    ],
    "date": "2026-10-12T00:04",
    "title": "What $1,000 in Nike in 2020 Is Worth Today",
-   "views": 826,
-   "views_at": "2026-10-14"
+   "views": 833,
+   "views_at": "2026-10-15"
   },
   {
    "id": "lCyQoJuFIeY",
@@ -40,8 +40,8 @@
    ],
    "date": "2026-10-12T06:01",
    "title": "Stock Battle: S&P 500 vs Tesla - Who Won?",
-   "views": 348,
-   "views_at": "2026-10-14"
+   "views": 372,
+   "views_at": "2026-10-15"
   },
   {
    "id": "mEOSF-GTQ-U",
@@ -54,8 +54,8 @@
    ],
    "date": "2026-10-12T22:59",
    "title": "TSMC Just Lost $232 Billion in One Day",
-   "views": 816,
-   "views_at": "2026-10-14"
+   "views": 803,
+   "views_at": "2026-10-15"
   },
   {
    "id": "_1CbyH8ftCI",
@@ -68,8 +68,8 @@
    ],
    "date": "2026-10-12T23:58",
    "title": "What $1,000 in Intel During COVID Is Worth Today",
-   "views": 889,
-   "views_at": "2026-10-14"
+   "views": 1033,
+   "views_at": "2026-10-15"
   },
   {
    "id": "vhXa8WOZuDk",
@@ -81,7 +81,9 @@
     "MCD"
    ],
    "date": "2026-10-13T01:16",
-   "title": "Time Machine: Did McDonald's Beat The Market?"
+   "title": "Time Machine: Did McDonald's Beat The Market?",
+   "views": 339,
+   "views_at": "2026-10-15"
   },
   {
    "id": "IKK8VNf3ee8",
@@ -93,7 +95,9 @@
     "ADBE"
    ],
    "date": "2026-10-13T06:01",
-   "title": "Adobe: Did $1,000 in 2016 Beat the Market?"
+   "title": "Adobe: Did $1,000 in 2016 Beat the Market?",
+   "views": 189,
+   "views_at": "2026-10-15"
   },
   {
    "id": "UD2lXlnSEa4",
@@ -105,7 +109,9 @@
     "NVDA"
    ],
    "date": "2026-10-13T23:07",
-   "title": "Nvidia Just Added $53 Billion in One Day"
+   "title": "Nvidia Just Added $53 Billion in One Day",
+   "views": 258,
+   "views_at": "2026-10-15"
   },
   {
    "id": "cCXqiBNYPf0",
@@ -143,6 +149,19 @@
    ],
    "date": "2026-10-14T23:07",
    "title": "MARKET SHOCK: TSMC’s Massive Multi-Billion Dollar Drop"
+  },
+  {
+   "id": "NSpZU_N9F0U",
+   "series": "battle",
+   "hook": "imagine",
+   "mode": "battle",
+   "key": "battle KO PEP",
+   "tickers": [
+    "KO",
+    "PEP"
+   ],
+   "date": "2026-10-15T00:03",
+   "title": "Coca-Cola vs. PepsiCo: The $1,000 Stock Battle"
   }
  ],
  "requests_done": {},
