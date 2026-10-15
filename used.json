@@ -162,6 +162,19 @@
    ],
    "date": "2026-10-15T00:03",
    "title": "Coca-Cola vs. PepsiCo: The $1,000 Stock Battle"
+  },
+  {
+   "id": "OOM2UmOct_E",
+   "series": "battle",
+   "hook": "imagine",
+   "mode": "battle",
+   "key": "battle PLTR NVDA",
+   "tickers": [
+    "PLTR",
+    "NVDA"
+   ],
+   "date": "2026-10-15T06:12",
+   "title": "$1,000 in Palantir vs Nvidia: Who Wins?"
   }
  ],
  "requests_done": {},
