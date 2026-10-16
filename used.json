@@ -218,6 +218,18 @@
    ],
    "date": "2026-10-16T06:11",
    "title": "What $1,000 in Eli Lilly in 2020 Is Worth Today"
+  },
+  {
+   "id": "LgKKk9idCQE",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-16",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-16T23:07",
+   "title": "TSMC Just Erased $250 Billion in Market Value"
   }
  ],
  "requests_done": {},
