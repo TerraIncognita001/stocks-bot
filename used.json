@@ -25,8 +25,8 @@
    ],
    "date": "2026-10-12T00:04",
    "title": "What $1,000 in Nike in 2020 Is Worth Today",
-   "views": 833,
-   "views_at": "2026-10-15"
+   "views": 855,
+   "views_at": "2026-10-16"
   },
   {
    "id": "lCyQoJuFIeY",
@@ -41,7 +41,7 @@
    "date": "2026-10-12T06:01",
    "title": "Stock Battle: S&P 500 vs Tesla - Who Won?",
    "views": 372,
-   "views_at": "2026-10-15"
+   "views_at": "2026-10-16"
   },
   {
    "id": "mEOSF-GTQ-U",
@@ -54,8 +54,8 @@
    ],
    "date": "2026-10-12T22:59",
    "title": "TSMC Just Lost $232 Billion in One Day",
-   "views": 803,
-   "views_at": "2026-10-15"
+   "views": 804,
+   "views_at": "2026-10-16"
   },
   {
    "id": "_1CbyH8ftCI",
@@ -68,8 +68,8 @@
    ],
    "date": "2026-10-12T23:58",
    "title": "What $1,000 in Intel During COVID Is Worth Today",
-   "views": 1033,
-   "views_at": "2026-10-15"
+   "views": 1051,
+   "views_at": "2026-10-16"
   },
   {
    "id": "vhXa8WOZuDk",
@@ -82,8 +82,8 @@
    ],
    "date": "2026-10-13T01:16",
    "title": "Time Machine: Did McDonald's Beat The Market?",
-   "views": 339,
-   "views_at": "2026-10-15"
+   "views": 344,
+   "views_at": "2026-10-16"
   },
   {
    "id": "IKK8VNf3ee8",
@@ -96,8 +96,8 @@
    ],
    "date": "2026-10-13T06:01",
    "title": "Adobe: Did $1,000 in 2016 Beat the Market?",
-   "views": 189,
-   "views_at": "2026-10-15"
+   "views": 235,
+   "views_at": "2026-10-16"
   },
   {
    "id": "UD2lXlnSEa4",
@@ -110,8 +110,8 @@
    ],
    "date": "2026-10-13T23:07",
    "title": "Nvidia Just Added $53 Billion in One Day",
-   "views": 258,
-   "views_at": "2026-10-15"
+   "views": 267,
+   "views_at": "2026-10-16"
   },
   {
    "id": "cCXqiBNYPf0",
@@ -124,7 +124,9 @@
     "CMG"
    ],
    "date": "2026-10-14T00:05",
-   "title": "Stock Battle: McDonald's vs Chipotle Since 2016"
+   "title": "Stock Battle: McDonald's vs Chipotle Since 2016",
+   "views": 206,
+   "views_at": "2026-10-16"
   },
   {
    "id": "KITbW6cLhB4",
@@ -136,7 +138,9 @@
     "AMZN"
    ],
    "date": "2026-10-14T06:10",
-   "title": "Amazon: What $1,000 in 2011 turned into today"
+   "title": "Amazon: What $1,000 in 2011 turned into today",
+   "views": 157,
+   "views_at": "2026-10-16"
   },
   {
    "id": "FENq-hNXBlw",
@@ -148,7 +152,9 @@
     "TSM"
    ],
    "date": "2026-10-14T23:07",
-   "title": "MARKET SHOCK: TSMC’s Massive Multi-Billion Dollar Drop"
+   "title": "MARKET SHOCK: TSMC’s Massive Multi-Billion Dollar Drop",
+   "views": 197,
+   "views_at": "2026-10-16"
   },
   {
    "id": "NSpZU_N9F0U",
@@ -187,6 +193,19 @@
    ],
    "date": "2026-10-15T23:05",
    "title": "TSMC Just Lost $201 Billion In A Day"
+  },
+  {
+   "id": "VLsAPJY2jqg",
+   "series": "battle",
+   "hook": "question",
+   "mode": "battle",
+   "key": "battle COST WMT",
+   "tickers": [
+    "COST",
+    "WMT"
+   ],
+   "date": "2026-10-16T00:01",
+   "title": "Stock Battle: Costco vs Walmart 10-Year Race"
   }
  ],
  "requests_done": {},
