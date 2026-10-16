@@ -206,6 +206,18 @@
    ],
    "date": "2026-10-16T00:01",
    "title": "Stock Battle: Costco vs Walmart 10-Year Race"
+  },
+  {
+   "id": "Zy3nDxS9bA0",
+   "series": "time_machine",
+   "hook": "number",
+   "mode": "crash",
+   "key": "time_machine LLY crash 7",
+   "tickers": [
+    "LLY"
+   ],
+   "date": "2026-10-16T06:11",
+   "title": "What $1,000 in Eli Lilly in 2020 Is Worth Today"
   }
  ],
  "requests_done": {},
