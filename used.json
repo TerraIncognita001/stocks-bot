@@ -249,6 +249,19 @@
    ],
    "date": "2026-10-17T00:01",
    "title": "Eli Lilly vs Pfizer: $1,000 Invested in 2016"
+  },
+  {
+   "id": "XyxpNGDpK5M",
+   "series": "battle",
+   "hook": "question",
+   "mode": "battle",
+   "key": "battle META SNAP",
+   "tickers": [
+    "META",
+    "SNAP"
+   ],
+   "date": "2026-10-17T06:07",
+   "title": "Meta vs Snap: The $1,000 Stock Race"
   }
  ],
  "requests_done": {},
