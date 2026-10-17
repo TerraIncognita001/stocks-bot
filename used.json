@@ -262,6 +262,18 @@
    ],
    "date": "2026-10-17T06:07",
    "title": "Meta vs Snap: The $1,000 Stock Race"
+  },
+  {
+   "id": "KW9XfYTM7bs",
+   "series": "time_machine",
+   "hook": "imagine",
+   "mode": "ago",
+   "key": "time_machine PTON ago 5",
+   "tickers": [
+    "PTON"
+   ],
+   "date": "2026-10-17T23:01",
+   "title": "What Happened to $1,000 Invested in Peloton?"
   }
  ],
  "requests_done": {},
