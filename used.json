@@ -274,6 +274,18 @@
    ],
    "date": "2026-10-17T23:01",
    "title": "What Happened to $1,000 Invested in Peloton?"
+  },
+  {
+   "id": "y1IyVLN8OdQ",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine AVGO ago 10",
+   "tickers": [
+    "AVGO"
+   ],
+   "date": "2026-10-17T23:59",
+   "title": "What $1,000 in Broadcom in 2016 is Worth Today"
   }
  ],
  "requests_done": {},
