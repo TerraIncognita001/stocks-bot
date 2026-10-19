@@ -348,6 +348,18 @@
    ],
    "date": "2026-10-19T06:14",
    "title": "What Happened to $1,000 Invested in Zoom?"
+  },
+  {
+   "id": "3JsWQrtdDIY",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-19",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-19T23:09",
+   "title": "TSMC Just Added $197 Billion in 24 Hours"
   }
  ],
  "requests_done": {},
