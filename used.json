@@ -336,6 +336,18 @@
    ],
    "date": "2026-10-19T00:02",
    "title": "What $1,000 in Moderna Became 5 Years Later"
+  },
+  {
+   "id": "YoNLXkDgr5Y",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine ZM ago 5",
+   "tickers": [
+    "ZM"
+   ],
+   "date": "2026-10-19T06:14",
+   "title": "What Happened to $1,000 Invested in Zoom?"
   }
  ],
  "requests_done": {},
