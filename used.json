@@ -376,6 +376,18 @@
    ],
    "date": "2026-10-20T00:07",
    "title": "Google: What $1,000 Invested in 2016 Is Worth Today"
+  },
+  {
+   "id": "tP-P5cjntq0",
+   "series": "peak",
+   "hook": "number",
+   "mode": "peak",
+   "key": "peak DIS peak 6",
+   "tickers": [
+    "DIS"
+   ],
+   "date": "2026-10-20T06:12",
+   "title": "What If You Bought Disney At The Peak?"
   }
  ],
  "requests_done": {},
