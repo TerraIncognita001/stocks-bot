@@ -388,6 +388,18 @@
    ],
    "date": "2026-10-20T06:12",
    "title": "What If You Bought Disney At The Peak?"
+  },
+  {
+   "id": "zaIAAGXhL7g",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-20",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-20T23:09",
+   "title": "TSMC Just Added $126 Billion in One Day!"
   }
  ],
  "requests_done": {},
