@@ -430,6 +430,18 @@
    ],
    "date": "2026-10-21T06:13",
    "title": "TIME MACHINE: What $1,000 in Amazon Became"
+  },
+  {
+   "id": "4mDwMvfPz-A",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-21",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-21T23:09",
+   "title": "MARKET SHOCK: TSMC’s Massive $177B Valuation Surge"
   }
  ],
  "requests_done": {},
