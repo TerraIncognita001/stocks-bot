@@ -418,6 +418,18 @@
    ],
    "date": "2026-10-21T00:06",
    "title": "Netflix: What $1,000 invested in 2016 is worth today"
+  },
+  {
+   "id": "aVj0VzU7UIk",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine AMZN ago 10",
+   "tickers": [
+    "AMZN"
+   ],
+   "date": "2026-10-21T06:13",
+   "title": "TIME MACHINE: What $1,000 in Amazon Became"
   }
  ],
  "requests_done": {},
