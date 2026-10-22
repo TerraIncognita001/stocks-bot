@@ -460,6 +460,19 @@
    ],
    "date": "2026-10-22T00:06",
    "title": "Buying Alibaba at the Very Top: What Happened?"
+  },
+  {
+   "id": "pnep_afXvVE",
+   "series": "battle",
+   "hook": "you",
+   "mode": "battle",
+   "key": "battle TSM INTC",
+   "tickers": [
+    "TSM",
+    "INTC"
+   ],
+   "date": "2026-10-22T06:15",
+   "title": "TSMC vs Intel: What Happened to $1,000 Since 2016?"
   }
  ],
  "requests_done": {},
