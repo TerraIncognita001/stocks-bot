@@ -473,6 +473,18 @@
    ],
    "date": "2026-10-22T06:15",
    "title": "TSMC vs Intel: What Happened to $1,000 Since 2016?"
+  },
+  {
+   "id": "BuCPkoTuP4Q",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-22",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-22T23:11",
+   "title": "MARKET SHOCK: TSMC loses over $500 billion in one day"
   }
  ],
  "requests_done": {},
