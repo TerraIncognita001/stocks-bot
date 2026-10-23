@@ -516,6 +516,18 @@
    ],
    "date": "2026-10-23T06:14",
    "title": "What If You Invested $1,000 in Walmart in 2011?"
+  },
+  {
+   "id": "Bt5nL9-hRd4",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-23",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-23T23:09",
+   "title": "MARKET SHOCK: TSMC’s Massive Single-Day Surge"
   }
  ],
  "requests_done": {},
