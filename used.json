@@ -504,6 +504,18 @@
    ],
    "date": "2026-10-23T00:06",
    "title": "Coinbase vs Robinhood: Who Won the Crypto Race?"
+  },
+  {
+   "id": "SQU9BImFWLw",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine WMT ago 15",
+   "tickers": [
+    "WMT"
+   ],
+   "date": "2026-10-23T06:14",
+   "title": "What If You Invested $1,000 in Walmart in 2011?"
   }
  ],
  "requests_done": {},
