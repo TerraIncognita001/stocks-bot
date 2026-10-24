@@ -546,6 +546,19 @@
    ],
    "date": "2026-10-24T00:05",
    "title": "What $1,000 in AMD Turned Into 10 Years Later"
+  },
+  {
+   "id": "dxVA1myiI-4",
+   "series": "battle",
+   "hook": "question",
+   "mode": "battle",
+   "key": "battle COST TGT",
+   "tickers": [
+    "COST",
+    "TGT"
+   ],
+   "date": "2026-10-24T06:10",
+   "title": "Costco vs Target: The $1,000 Stock Battle"
   }
  ],
  "requests_done": {},
