@@ -589,6 +589,18 @@
    ],
    "date": "2026-10-25T00:01",
    "title": "What $1,000 in IBM Became 5 Years Later"
+  },
+  {
+   "id": "_M6C5RXcqDg",
+   "series": "time_machine",
+   "hook": "imagine",
+   "mode": "ago",
+   "key": "time_machine UBER ago 5",
+   "tickers": [
+    "UBER"
+   ],
+   "date": "2026-10-25T07:23",
+   "title": "What If You Invested $1,000 in Uber Years Ago?"
   }
  ],
  "requests_done": {},
