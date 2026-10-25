@@ -601,6 +601,18 @@
    ],
    "date": "2026-10-25T07:23",
    "title": "What If You Invested $1,000 in Uber Years Ago?"
+  },
+  {
+   "id": "rliL8ajge1M",
+   "series": "time_machine",
+   "hook": "you",
+   "mode": "ago",
+   "key": "time_machine AMC ago 10",
+   "tickers": [
+    "AMC"
+   ],
+   "date": "2026-10-25T23:05",
+   "title": "AMC: What Happened to Your $1,000 Investment?"
   }
  ],
  "requests_done": {},
