@@ -29,10 +29,10 @@
  },
  "NVDA": {
   "name": "NVIDIA Corp",
-  "shares": 24200,
+  "shares": 24100,
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959144056.png",
-  "mcap": 5160532.8985033855,
-  "fetched": "2026-10-19"
+  "mcap": 5084136.160850911,
+  "fetched": "2026-10-26"
  },
  "AMZN": {
   "name": "Amazon.com Inc",
@@ -162,10 +162,10 @@
  },
  "AMD": {
   "name": "Advanced Micro Devices Inc",
-  "shares": 1630.6,
+  "shares": 1632.48,
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMD.png",
-  "mcap": 863171.1133550705,
-  "fetched": "2026-10-19"
+  "mcap": 843646.7304681322,
+  "fetched": "2026-10-26"
  },
  "INTC": {
   "name": "Intel Corp",

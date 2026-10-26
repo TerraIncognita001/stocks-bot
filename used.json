@@ -643,6 +643,19 @@
    ],
    "date": "2026-10-26T01:42",
    "title": "Time Machine: Did Pfizer actually lose money?"
+  },
+  {
+   "id": "S0j6BJfgp_k",
+   "series": "battle",
+   "hook": "imagine",
+   "mode": "battle",
+   "key": "battle NVDA AMD",
+   "tickers": [
+    "NVDA",
+    "AMD"
+   ],
+   "date": "2026-10-26T07:35",
+   "title": "Nvidia vs AMD: The 10-Year $1,000 Stock Battle!"
   }
  ],
  "requests_done": {},
