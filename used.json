@@ -656,6 +656,18 @@
    ],
    "date": "2026-10-26T07:35",
    "title": "Nvidia vs AMD: The 10-Year $1,000 Stock Battle!"
+  },
+  {
+   "id": "5wu7uTi7c50",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-26",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-26T23:13",
+   "title": "TSMC Just Shifted $152 Billion in One Day!"
   }
  ],
  "requests_done": {},
