@@ -631,6 +631,18 @@
    ],
    "date": "2026-10-26T00:03",
    "title": "What $1,000 in Ford Stock Became 10 Years Later"
+  },
+  {
+   "id": "u8sKHOpgAbQ",
+   "series": "time_machine",
+   "hook": "question",
+   "mode": "ago",
+   "key": "time_machine PFE ago 5",
+   "tickers": [
+    "PFE"
+   ],
+   "date": "2026-10-26T01:42",
+   "title": "Time Machine: Did Pfizer actually lose money?"
   }
  ],
  "requests_done": {},

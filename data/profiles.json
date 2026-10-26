@@ -358,10 +358,10 @@
  },
  "PFE": {
   "name": "Pfizer Inc",
-  "shares": 5699.44,
+  "shares": 5699.67,
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PFE.png",
-  "mcap": 168596.34045105366,
-  "fetched": "2026-10-19"
+  "mcap": 171161.1908248846,
+  "fetched": "2026-10-26"
  },
  "MRNA": {
   "name": "Moderna Inc",
