@@ -698,6 +698,18 @@
    ],
    "date": "2026-10-27T01:26",
    "title": "What $1,000 in Snap Stock in 2020 Is Worth Today"
+  },
+  {
+   "id": "uUGPyFYZMJk",
+   "series": "time_machine",
+   "hook": "imagine",
+   "mode": "ago",
+   "key": "time_machine PLTR ago 5",
+   "tickers": [
+    "PLTR"
+   ],
+   "date": "2026-10-27T07:32",
+   "title": "What $1,000 in Palantir Stock Became (PLTR)"
   }
  ],
  "requests_done": {},
