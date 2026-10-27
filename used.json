@@ -710,6 +710,18 @@
    ],
    "date": "2026-10-27T07:32",
    "title": "What $1,000 in Palantir Stock Became (PLTR)"
+  },
+  {
+   "id": "uW49-i9Z12U",
+   "series": "shock",
+   "hook": "number",
+   "mode": "shock",
+   "key": "shock 2026-10-27",
+   "tickers": [
+    "TSM"
+   ],
+   "date": "2026-10-27T23:14",
+   "title": "TSMC Just Gained $324 Billion in a Single Day"
   }
  ],
  "requests_done": {},
